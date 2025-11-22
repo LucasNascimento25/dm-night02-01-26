@@ -44,15 +44,22 @@ export async function handleMessages(sock, message) {
             const confissaoHandled = await confissoesHandler.handlePrivateMessage(sock, message, from, userId, content);
             if (confissaoHandled) {
                 console.log('✅ Confissão processada no privado');
-                return; // Para aqui, não processa outros comandos
+                return;
             }
+        }
+
+        // 🎵 COMANDO #atualizaraudios - ATUALIZA ÁUDIOS DO GITHUB
+        if (olhinhoHandler.isComandoAtualizar(message)) {
+            console.log('🔄 Comando #atualizaraudios detectado');
+            await olhinhoHandler.handleComandoAtualizar(sock, message);
+            return;
         }
 
         // 👁️ DETECTA REAÇÕES DE OLHINHO (PRIORIDADE ALTA)
         const isReaction = await olhinhoHandler.handleReactionFromMessage(sock, message);
         if (isReaction) {
             console.log('✅ Reação de olhinho processada');
-            return; // Para aqui, não processa como mensagem
+            return;
         }
 
         // Moderação e Anti-link
