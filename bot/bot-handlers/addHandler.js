@@ -2,8 +2,23 @@
 import { configurarBoasVindas } from '../codigos/features/boasVindas.js';
 import { onUserJoined, isBlacklistedRealtime } from '../codigos/moderation/blacklist/blacklistFunctions.js';
 
+// ✅ Função auxiliar para extrair ID do participant (string ou objeto)
+const getParticipantId = (participantData) => {
+    // Se for string (versão antiga), retorna direto
+    if (typeof participantData === 'string') {
+        return participantData;
+    }
+    // Se for objeto (versão nova), extrai phoneNumber ou id
+    if (typeof participantData === 'object' && participantData !== null) {
+        return participantData.phoneNumber || participantData.id;
+    }
+    return participantData;
+};
+
 export async function handleUserAdd(sock, groupId, participants) {
-    for (const participant of participants) {
+    for (const participantData of participants) {
+        // ✅ CORREÇÃO: Extrai o ID correto (funciona com string ou objeto)
+        const participant = getParticipantId(participantData);
         const userPhone = participant.split('@')[0];
 
         console.log(`\n🔍 ========= VERIFICAÇÃO DE BLACKLIST =========`);

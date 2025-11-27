@@ -1,485 +1,664 @@
-// alertaHandler.js - Sistema de Moderação com #alerta
+// alertaHandler.js - Sistema de Moderação Completo
+// Versão otimizada com envio imediato de áudios
 
-/**
- * Função robusta para deletar mensagem (igual ao antilink)
- */
-async function deleteMessage(sock, groupId, messageKey) {
-    const delays = [0, 100, 500, 1000, 2000, 5000];
+import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import githubCache from "../utils/githubCacheManager.js";
+
+const execPromise = promisify(exec);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+console.log('✅ alertaHandler.js CARREGADO!');
+
+// ============================================
+// CONFIGURAÇÕES
+// ============================================
+const CONFIG = {
+    URL_AUDIOS: 'https://raw.githubusercontent.com/LucasNascimento25/audio-regras/main/audios-regras.json',
+    CACHE_KEY: 'alertas-regras-audios',
+    AUDIO_INTERVAL: 0, // ⚡ SEM INTERVALO - ENVIO IMEDIATO
+    MAX_RETRIES: 3,
+    DOWNLOAD_TIMEOUT: 30000,
+    DEBUG: process.env.DEBUG === 'true'
+};
+
+// ============================================
+// GERENCIAMENTO DE ÁUDIOS
+// ============================================
+async function carregarAudios(forceRefresh = false) {
+    try {
+        console.log(`🔄 Carregando áudios das regras... ${forceRefresh ? '(FORÇANDO ATUALIZAÇÃO)' : ''}`);
+        
+        const result = await githubCache.fetch(
+            CONFIG.URL_AUDIOS,
+            CONFIG.CACHE_KEY,
+            (data) => {
+                const audios = (data.audios || []).filter(a => a.ativo === true && a.comando === 'regras');
+                
+                if (CONFIG.DEBUG) {
+                    console.log(`🔍 Áudios filtrados: ${audios.length}`);
+                }
+                
+                return audios;
+            },
+            forceRefresh
+        );
+
+        if (result.success && result.data && result.data.length > 0) {
+            const origem = result.fromCache ? 'cache' : 'GitHub';
+            console.log(`✅ ${result.data.length} áudios carregados (${origem})`);
+            
+            if (!result.fromCache || CONFIG.DEBUG) {
+                console.log('🎵 Lista:', result.data.map(a => a.nome).join(', '));
+            }
+            
+            return result.data;
+        } else {
+            console.error('❌ Nenhum áudio disponível');
+            return [];
+        }
+    } catch (error) {
+        console.error('❌ Erro ao carregar áudios:', error.message);
+        if (CONFIG.DEBUG) console.error(error.stack);
+        return [];
+    }
+}
+
+function converterParaRawUrl(url) {
+    if (!url) return url;
     
+    return url.includes('github.com') && url.includes('/blob/')
+        ? url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/')
+        : url;
+}
+
+async function downloadAudioBuffer(url) {
+    if (!url) {
+        throw new Error('URL do áudio não fornecida');
+    }
+
+    for (let attempt = 0; attempt < CONFIG.MAX_RETRIES; attempt++) {
+        try {
+            if (attempt > 0) {
+                const delay = 1000 * Math.pow(2, attempt - 1);
+                console.log(`⏰ Aguardando ${delay}ms antes da próxima tentativa...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+
+            const rawUrl = converterParaRawUrl(url);
+            console.log(`📥 Baixando áudio (tentativa ${attempt + 1}/${CONFIG.MAX_RETRIES})...`);
+
+            const response = await axios.get(rawUrl, {
+                responseType: 'arraybuffer',
+                timeout: CONFIG.DOWNLOAD_TIMEOUT,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (compatible; WhatsAppBot/1.0)',
+                    'Accept': 'audio/mpeg, audio/*, */*',
+                    'Cache-Control': 'no-cache'
+                },
+                maxRedirects: 5
+            });
+
+            if (!response.data || response.data.byteLength === 0) {
+                throw new Error('Buffer vazio recebido');
+            }
+
+            console.log(`✅ Baixado: ${(response.data.byteLength / 1024).toFixed(2)} KB`);
+            return Buffer.from(response.data);
+
+        } catch (error) {
+            const errorMsg = error.response?.status 
+                ? `HTTP ${error.response.status}` 
+                : error.message;
+            
+            console.error(`❌ Tentativa ${attempt + 1} falhou: ${errorMsg}`);
+            
+            if (attempt === CONFIG.MAX_RETRIES - 1) {
+                throw new Error(`Falha após ${CONFIG.MAX_RETRIES} tentativas: ${errorMsg}`);
+            }
+        }
+    }
+}
+
+async function converterParaOpus(inputBuffer) {
+    try {
+        const tempDir = path.join(__dirname, '../../../temp');
+        
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+            console.log(`📁 Diretório temp criado: ${tempDir}`);
+        }
+
+        const timestamp = Date.now();
+        const inputPath = path.join(tempDir, `input_${timestamp}.mp3`);
+        const outputPath = path.join(tempDir, `output_${timestamp}.opus`);
+
+        fs.writeFileSync(inputPath, inputBuffer);
+        
+        const ffmpegCmd = `ffmpeg -i "${inputPath}" -c:a libopus -b:a 64k -ar 48000 -ac 1 -application voip -compression_level 10 "${outputPath}" -y`;
+        
+        if (CONFIG.DEBUG) {
+            console.log(`🔧 Executando: ${ffmpegCmd}`);
+        }
+        
+        await execPromise(ffmpegCmd);
+
+        if (!fs.existsSync(outputPath)) {
+            throw new Error('Arquivo Opus não foi criado');
+        }
+
+        const audioConvertido = fs.readFileSync(outputPath);
+
+        try {
+            fs.unlinkSync(inputPath);
+            fs.unlinkSync(outputPath);
+        } catch (e) {
+            if (CONFIG.DEBUG) console.log('⚠️ Erro ao limpar arquivos temp:', e.message);
+        }
+
+        console.log(`✅ Convertido para Opus: ${(audioConvertido.length / 1024).toFixed(2)} KB`);
+        return audioConvertido;
+
+    } catch (error) {
+        console.error('❌ Erro na conversão Opus:', error.message);
+        if (CONFIG.DEBUG) console.error(error.stack);
+        return null;
+    }
+}
+
+async function normalizarMp3(inputBuffer) {
+    try {
+        const tempDir = path.join(__dirname, '../../../temp');
+        
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+        }
+
+        const timestamp = Date.now();
+        const inputPath = path.join(tempDir, `mp3_input_${timestamp}.mp3`);
+        const outputPath = path.join(tempDir, `mp3_output_${timestamp}.mp3`);
+
+        fs.writeFileSync(inputPath, inputBuffer);
+        
+        const ffmpegCmd = `ffmpeg -i "${inputPath}" -ar 48000 -b:a 128k -ac 1 "${outputPath}" -y`;
+        
+        if (CONFIG.DEBUG) {
+            console.log(`🔧 Normalizando MP3: ${ffmpegCmd}`);
+        }
+        
+        await execPromise(ffmpegCmd);
+
+        if (!fs.existsSync(outputPath)) {
+            throw new Error('Arquivo MP3 normalizado não foi criado');
+        }
+
+        const audioNormalizado = fs.readFileSync(outputPath);
+
+        try {
+            fs.unlinkSync(inputPath);
+            fs.unlinkSync(outputPath);
+        } catch (e) {
+            if (CONFIG.DEBUG) console.log('⚠️ Erro ao limpar arquivos temp MP3:', e.message);
+        }
+
+        console.log(`✅ MP3 normalizado: ${(audioNormalizado.length / 1024).toFixed(2)} KB`);
+        return audioNormalizado;
+
+    } catch (error) {
+        console.error('❌ Erro ao normalizar MP3:', error.message);
+        if (CONFIG.DEBUG) console.error(error.stack);
+        return null;
+    }
+}
+
+// ============================================
+// ENVIO DE ÁUDIOS
+// ============================================
+async function sendAudioByIndex(sock, jid, audios, index, quotedMessage = null) {
+    try {
+        if (!audios || audios.length === 0) {
+            console.error('❌ Array de áudios vazio');
+            return false;
+        }
+
+        if (index < 0 || index >= audios.length) {
+            console.error(`❌ Índice inválido: ${index} (total: ${audios.length})`);
+            return false;
+        }
+
+        const audioInfo = audios[index];
+        
+        if (!audioInfo || !audioInfo.url) {
+            console.error(`❌ Áudio ${index + 1} não tem URL válida`);
+            return false;
+        }
+
+        console.log(`\n🎵 Enviando: ${audioInfo.nome} (${index + 1}/${audios.length})`);
+
+        const audioBuffer = await downloadAudioBuffer(audioInfo.url);
+        if (!audioBuffer) return false;
+
+        const sendOptions = quotedMessage ? { quoted: quotedMessage } : {};
+
+        const audioOpus = await converterParaOpus(audioBuffer);
+
+        if (audioOpus) {
+            try {
+                await sock.sendMessage(jid, {
+                    audio: audioOpus,
+                    mimetype: 'audio/ogg; codecs=opus',
+                    ptt: true
+                }, sendOptions);
+                
+                console.log(`✅ Enviado (Opus): ${audioInfo.nome}`);
+                return true;
+            } catch (err) {
+                console.log(`⚠️ Opus falhou (${err.message}), tentando MP3...`);
+            }
+        }
+
+        const audioMp3Normalizado = await normalizarMp3(audioBuffer);
+        
+        await sock.sendMessage(jid, {
+            audio: audioMp3Normalizado || audioBuffer,
+            mimetype: 'audio/mpeg',
+            ptt: true
+        }, sendOptions);
+
+        console.log(`✅ Enviado (MP3): ${audioInfo.nome}`);
+        return true;
+
+    } catch (error) {
+        console.error(`❌ Erro ao enviar áudio ${index + 1}:`, error.message);
+        if (CONFIG.DEBUG) console.error(error.stack);
+        return false;
+    }
+}
+
+async function sendAudiosSequencial(sock, jid, audios, startIndex, count, quotedMessage = null) {
+    if (!audios || audios.length === 0) {
+        console.error('❌ Nenhum áudio disponível para envio');
+        return;
+    }
+
+    const endIndex = Math.min(startIndex + count, audios.length);
+    const actualCount = endIndex - startIndex;
+
+    console.log(`\n🎵 Enviando ${actualCount} áudios IMEDIATAMENTE (${startIndex + 1} a ${endIndex})`);
+
+    for (let i = 0; i < actualCount; i++) {
+        // ⚡ SEM DELAY - ENVIO IMEDIATO
+        await sendAudioByIndex(sock, jid, audios, startIndex + i, quotedMessage);
+    }
+
+    console.log('✅ Envio sequencial concluído\n');
+}
+
+async function sendAudiosSequencialComResposta(sock, jid, audios, startIndex, count, quotedMessage, targetParticipant) {
+    if (!audios || audios.length === 0) {
+        console.error('❌ Nenhum áudio disponível para envio');
+        return;
+    }
+
+    const endIndex = Math.min(startIndex + count, audios.length);
+    const actualCount = endIndex - startIndex;
+
+    console.log(`\n🎵 Enviando ${actualCount} áudios IMEDIATAMENTE respondendo mensagem (${startIndex + 1} a ${endIndex})`);
+
+    for (let i = 0; i < actualCount; i++) {
+        // ⚡ SEM DELAY - ENVIO IMEDIATO
+        try {
+            const audioInfo = audios[startIndex + i];
+            
+            if (!audioInfo || !audioInfo.url) {
+                console.error(`❌ Áudio ${startIndex + i + 1} não tem URL válida`);
+                continue;
+            }
+
+            console.log(`\n🎵 Enviando: ${audioInfo.nome} (${startIndex + i + 1}/${audios.length})`);
+
+            const audioBuffer = await downloadAudioBuffer(audioInfo.url);
+            if (!audioBuffer) continue;
+
+            const audioOpus = await converterParaOpus(audioBuffer);
+
+            if (audioOpus) {
+                try {
+                    await sock.sendMessage(jid, {
+                        audio: audioOpus,
+                        mimetype: 'audio/ogg; codecs=opus',
+                        ptt: true,
+                        contextInfo: {
+                            mentionedJid: [targetParticipant]
+                        }
+                    }, { quoted: quotedMessage });
+                    
+                    console.log(`✅ Enviado (Opus) com menção: ${audioInfo.nome}`);
+                    continue;
+                } catch (err) {
+                    console.log(`⚠️ Opus falhou (${err.message}), tentando MP3...`);
+                }
+            }
+
+            const audioMp3Normalizado = await normalizarMp3(audioBuffer);
+            
+            await sock.sendMessage(jid, {
+                audio: audioMp3Normalizado || audioBuffer,
+                mimetype: 'audio/mpeg',
+                ptt: true,
+                contextInfo: {
+                    mentionedJid: [targetParticipant]
+                }
+            }, { quoted: quotedMessage });
+
+            console.log(`✅ Enviado (MP3) com menção: ${audioInfo.nome}`);
+
+        } catch (error) {
+            console.error(`❌ Erro ao enviar áudio ${startIndex + i + 1}:`, error.message);
+            if (CONFIG.DEBUG) console.error(error.stack);
+        }
+    }
+
+    console.log('✅ Envio sequencial com resposta concluído\n');
+}
+
+// ============================================
+// UTILITÁRIOS
+// ============================================
+async function deleteMessage(sock, groupId, messageKey) {
+    const delays = [0, 100, 500, 1000, 2000];
+
     for (let i = 0; i < delays.length; i++) {
         try {
-            if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
-            
-            const key = {
-                remoteJid: messageKey.remoteJid || groupId,
-                fromMe: false,
-                id: messageKey.id,
-                participant: messageKey.participant
-            };
-            
-            await sock.sendMessage(groupId, { delete: key });
+            if (delays[i] > 0) {
+                await new Promise(r => setTimeout(r, delays[i]));
+            }
+
+            await sock.sendMessage(groupId, {
+                delete: {
+                    remoteJid: messageKey.remoteJid || groupId,
+                    fromMe: false,
+                    id: messageKey.id,
+                    participant: messageKey.participant
+                }
+            });
+
             console.log(`✅ Mensagem deletada (tentativa ${i + 1})`);
             return true;
         } catch (error) {
-            console.log(`❌ Tentativa ${i + 1} falhou:`, error.message);
+            if (i === delays.length - 1) {
+                console.log(`⚠️ Não foi possível deletar mensagem: ${error.message}`);
+            }
         }
     }
     return false;
 }
 
-/**
- * Extrai apenas os dígitos do número (adaptado de blacklistFunctions.js)
- */
-function extractDigits(number) {
-    // Remove tudo que não é dígito
-    let digits = number.replace(/@.*$/, '').replace(/\D/g, '');
-    
-    // Adiciona 55 se for número brasileiro de 11 dígitos sem código de país
-    if (digits.length === 11 && !digits.startsWith('55')) {
-        digits = '55' + digits;
-    }
-    
-    return digits;
-}
-
-/**
- * 🔥 Resolve LID para número real usando múltiplos métodos
- */
-async function resolverNumeroReal(sock, senderJid, chatJid) {
+async function getGroupDescription(sock, groupId) {
     try {
-        // Método 1: Se não é LID, retorna direto
-        if (!senderJid.includes('@lid')) {
-            console.log('✅ Não é LID, usando JID original:', senderJid);
-            return senderJid;
-        }
-
-        console.log('🔍 Detectado LID, tentando resolver:', senderJid);
-
-        // Método 2: Tenta buscar nos metadados do grupo
-        if (chatJid.includes('@g.us')) {
-            try {
-                const groupMetadata = await sock.groupMetadata(chatJid);
-                
-                // Busca o participante pelo LID
-                const participant = groupMetadata.participants.find(p => p.id === senderJid);
-                
-                if (participant) {
-                    console.log('📋 Participante encontrado:', JSON.stringify(participant, null, 2));
-                    
-                    // 🔥 PRIORIDADE: Campo phoneNumber (onde está o número REAL!)
-                    if (participant.phoneNumber) {
-                        console.log('✅ Número real via phoneNumber:', participant.phoneNumber);
-                        return participant.phoneNumber;
-                    }
-                    
-                    // Tenta diferentes campos onde o número real pode estar
-                    if (participant.jid) {
-                        console.log('✅ Número real via jid:', participant.jid);
-                        return participant.jid;
-                    }
-                    
-                    if (participant.notify) {
-                        console.log('✅ Número real via notify:', participant.notify);
-                        return participant.notify;
-                    }
-                    
-                    if (participant.phone) {
-                        const phoneJid = participant.phone + '@s.whatsapp.net';
-                        console.log('✅ Número real via phone:', phoneJid);
-                        return phoneJid;
-                    }
-                }
-            } catch (err) {
-                console.error('❌ Erro ao buscar metadados:', err.message);
-            }
-        }
-
-        // Método 3: Tenta usar store (se disponível)
-        if (sock.store?.contacts?.[senderJid]) {
-            const contact = sock.store.contacts[senderJid];
-            if (contact.notify || contact.name) {
-                console.log('✅ Número via store:', contact);
-                return contact.id || senderJid;
-            }
-        }
-
-        // Método 4: Tenta extrair do próprio LID (alguns casos)
-        const lidMatch = senderJid.match(/^(\d+)@lid$/);
-        if (lidMatch) {
-            const possibleJid = lidMatch[1] + '@s.whatsapp.net';
-            console.log('🔄 Tentando JID construído:', possibleJid);
-            return possibleJid;
-        }
-
-        console.log('⚠️ Não foi possível resolver LID, usando original');
-        return senderJid;
-
+        const metadata = await sock.groupMetadata(groupId);
+        return metadata.desc || null;
     } catch (error) {
-        console.error('❌ Erro em resolverNumeroReal:', error);
-        return senderJid;
+        console.error('❌ Erro ao buscar descrição do grupo:', error.message);
+        return null;
     }
 }
 
-/**
- * Verifica se usuário é administrador do grupo
- */
-async function verificarAdmin(sock, message) {
+function isValidParticipant(participant) {
+    if (!participant) return false;
+    
+    const participantNumber = participant.split('@')[0];
+    return !participantNumber.includes(':') && 
+           !participantNumber.startsWith('0') &&
+           participantNumber.length >= 10;
+}
+
+// ============================================
+// COMANDO: #atualizarregras
+// ============================================
+async function handleComandoAtualizarAudios(sock, message) {
     try {
-        const senderJid = message.key.participant || message.key.remoteJid;
-        const chatJid = message.key.remoteJid;
-        
-        // Verifica se é um grupo
-        if (!chatJid.includes('@g.us')) {
-            console.log('⚠️ Não é um grupo');
+        const from = message.key.remoteJid;
+        console.log('🔄 Comando #atualizarregras recebido');
+
+        await sock.sendMessage(from, {
+            text: '🔄 *Atualizando áudios...*\n_Isso pode levar alguns segundos_'
+        }, { quoted: message });
+
+        const audios = await carregarAudios(true);
+
+        if (audios && audios.length > 0) {
+            const listaAudios = audios.map((a, i) => `   ${i + 1}. ${a.nome}`).join('\n');
+            
+            await sock.sendMessage(from, {
+                text: `✅ *Áudios atualizados com sucesso!*\n\n` +
+                      `🎵 *Total:* ${audios.length} áudios\n\n` +
+                      `📋 *Lista atualizada:*\n${listaAudios}\n\n` +
+                      `_Última atualização: ${new Date().toLocaleString('pt-BR')}_`
+            }, { quoted: message });
+            
+            console.log('✅ Comando #atualizarregras concluído com sucesso');
+            return true;
+        } else {
+            await sock.sendMessage(from, {
+                text: '❌ *Erro ao atualizar áudios!*\n\n' +
+                      'Nenhum áudio foi encontrado no repositório.\n' +
+                      'Verifique se o arquivo JSON está correto.'
+            }, { quoted: message });
+            
+            console.error('❌ Nenhum áudio encontrado após atualização');
             return false;
         }
+
+    } catch (error) {
+        console.error('❌ Erro no comando #atualizarregras:', error);
         
-        // Resolve o número real (lidando com LID)
-        const numeroReal = await resolverNumeroReal(sock, senderJid, chatJid);
+        try {
+            await sock.sendMessage(message.key.remoteJid, {
+                text: `❌ *Erro ao atualizar!*\n\n${error.message}`
+            }, { quoted: message });
+        } catch (e) {
+            console.error('❌ Erro ao enviar mensagem de erro:', e.message);
+        }
         
-        // Busca metadados do grupo
-        const groupMetadata = await sock.groupMetadata(chatJid);
-        
-        // Procura o participante na lista
-        const participant = groupMetadata.participants.find(p => {
-            const participantNumber = extractDigits(p.id);
-            const senderNumber = extractDigits(numeroReal);
-            return participantNumber === senderNumber;
-        });
-        
-        const isAdmin = participant ? (participant.admin === 'admin' || participant.admin === 'superadmin') : false;
-        
-        console.log('🔍 ========= Verificando Admin (Alerta) =========');
-        console.log('📥 Remetente JID original:', senderJid);
-        console.log('📥 Número real resolvido:', numeroReal);
-        console.log('📥 Chat JID:', chatJid);
-        console.log('👤 Participante encontrado:', participant ? 'Sim' : 'Não');
-        console.log('🔐 Tipo de admin:', participant?.admin || 'Não é admin');
-        console.log('🎯 É admin?', isAdmin);
-        console.log('=================================================\n');
-        
-        return isAdmin;
-        
-    } catch (err) {
-        console.error('❌ Erro em verificarAdmin:', err);
         return false;
     }
 }
 
-/**
- * Handler principal do comando #alerta
- */
+// ============================================
+// HANDLER PRINCIPAL
+// ============================================
 const alertaHandler = async (sock, message) => {
     try {
         const { key, message: msg } = message;
-        const from = key.remoteJid; // ID do grupo
-        const sender = key.participant || key.remoteJid; // ID do remetente
+        const from = key.remoteJid;
+        const sender = key.participant || key.remoteJid;
 
-        // Verificar PRIMEIRO se é realmente um comando #alerta
-        let isAlertaCommand = false;
+        const content = msg?.conversation 
+            || msg?.extendedTextMessage?.text 
+            || msg?.imageMessage?.caption 
+            || msg?.videoMessage?.caption 
+            || msg?.documentMessage?.caption 
+            || '';
 
-        // Verificação de imagem com #alerta
-        if (msg?.imageMessage?.caption?.includes('#alerta')) {
-            isAlertaCommand = true;
+        const contentTrimmed = content.toLowerCase().trim();
+
+        console.log(`\n🔍 alertaHandler chamado | Conteúdo: "${contentTrimmed}"`);
+
+        if (contentTrimmed === '#atualizarregras') {
+            console.log('✅ Processando #atualizarregras');
+            return await handleComandoAtualizarAudios(sock, message);
         }
 
-        // Verificação de vídeo com #alerta
-        if (msg?.videoMessage?.caption?.includes('#alerta')) {
-            isAlertaCommand = true;
-        }
-
-        // Verificação de figurinha/sticker com #alerta (respondendo)
-        if (msg?.stickerMessage && msg?.extendedTextMessage?.text?.includes('#alerta')) {
-            isAlertaCommand = true;
-        }
-
-        // Verificação de áudio com #alerta (respondendo)
-        if (msg?.audioMessage && msg?.extendedTextMessage?.text?.includes('#alerta')) {
-            isAlertaCommand = true;
-        }
-
-        // Verificação de documento com #alerta
-        if (msg?.documentMessage?.caption?.includes('#alerta')) {
-            isAlertaCommand = true;
-        }
-
-        // Verificação de texto estendido com #alerta (resposta/quote)
-        if (msg?.extendedTextMessage?.text?.includes('#alerta')) {
-            isAlertaCommand = true;
-        }
-
-        // Verificação de mensagem de texto simples
-        if (msg?.conversation?.includes('#alerta')) {
-            isAlertaCommand = true;
-        }
-
-        // Se NÃO for comando #alerta, sai da função sem fazer nada
-        if (!isAlertaCommand) {
+        if (!content.includes('#alerta')) {
+            console.log('⏭️ Não é comando #alerta, ignorando');
             return false;
         }
 
-        console.log('\n🚨 ========= COMANDO #ALERTA DETECTADO =========');
-        console.log('📱 Grupo:', from);
-        console.log('👤 Admin:', sender);
-        console.log('================================================\n');
+        console.log('✅ Processando #alerta');
 
-        // Verifica se é um grupo
         if (!from.includes('@g.us')) {
-            await sock.sendMessage(from, { 
-                text: '⚠️ Este comando só funciona em grupos!' 
+            await sock.sendMessage(from, {
+                text: '⚠️ *Este comando só funciona em grupos!*'
             }, { quoted: message });
             return true;
         }
 
-        // Busca informações do grupo
+        const audios = await carregarAudios();
+        if (!audios || audios.length === 0) {
+            await sock.sendMessage(from, {
+                text: '❌ *Áudios não disponíveis no momento.*\n\n' +
+                      'Tente usar *#atualizarregras* primeiro ou aguarde alguns minutos.'
+            }, { quoted: message });
+            return true;
+        }
+
         const groupMetadata = await sock.groupMetadata(from);
 
-        // Verifica se quem enviou é administrador
         const isAdmin = groupMetadata.participants.some(
-            participant => participant.id === sender && participant.admin
+            p => p.id === sender && (p.admin === 'admin' || p.admin === 'superadmin')
         );
 
         if (!isAdmin) {
-            await sock.sendMessage(from, { 
-                text: '🚫 *Ops!* 😅\n\n' +
-                      '👮‍♀️ Somente *administradores do grupo* podem usar este comando! 💪'
+            await sock.sendMessage(from, {
+                text: '🚫 *Somente administradores podem usar este comando!*'
             }, { quoted: message });
-            console.log('❌ Ação não permitida, o remetente não é um administrador.');
             return true;
         }
 
-        // Variável para armazenar a mensagem a ser deletada
         let targetMessageId = null;
         let targetParticipant = null;
 
-        // Processar comando #alerta em imagem
-        if (msg?.imageMessage?.caption?.includes('#alerta')) {
-            const imageContext = msg.imageMessage.contextInfo;
-            if (imageContext?.stanzaId && imageContext?.participant) {
-                targetMessageId = imageContext.stanzaId;
-                targetParticipant = imageContext.participant;
-            }
-        }
+        const contextInfo = msg?.extendedTextMessage?.contextInfo 
+            || msg?.imageMessage?.contextInfo 
+            || msg?.videoMessage?.contextInfo 
+            || msg?.documentMessage?.contextInfo;
 
-        // Processar comando #alerta em vídeo
-        if (msg?.videoMessage?.caption?.includes('#alerta')) {
-            const videoContext = msg.videoMessage.contextInfo;
-            if (videoContext?.stanzaId && videoContext?.participant) {
-                targetMessageId = videoContext.stanzaId;
-                targetParticipant = videoContext.participant;
-            }
-        }
-
-        // Processar comando #alerta em documento
-        if (msg?.documentMessage?.caption?.includes('#alerta')) {
-            const docContext = msg.documentMessage.contextInfo;
-            if (docContext?.stanzaId && docContext?.participant) {
-                targetMessageId = docContext.stanzaId;
-                targetParticipant = docContext.participant;
-            }
-        }
-
-        // Processar comando #alerta em resposta/quote (PRINCIPAL)
-        // Este é o mais comum: admin responde qualquer tipo de mensagem com #alerta
-        if (msg?.extendedTextMessage?.text?.includes('#alerta')) {
-            const quotedContext = msg.extendedTextMessage.contextInfo;
-            if (quotedContext?.stanzaId && quotedContext?.participant) {
-                targetMessageId = quotedContext.stanzaId;
-                targetParticipant = quotedContext.participant;
-            }
-        }
-
-        // 🔥 NOVA FUNCIONALIDADE: Se não há mensagem citada, mostra regras para TODOS
-        if (!targetMessageId || !targetParticipant) {
-            console.log('📢 Nenhuma mensagem citada - enviando regras para todos do grupo');
-            
-            // 🗑️ Remove a mensagem do admin com #alerta
-            try {
-                const adminKeyToDelete = {
-                    remoteJid: from,
-                    id: key.id,
-                    participant: sender
-                };
-                await deleteMessage(sock, from, adminKeyToDelete);
-                console.log('✅ Mensagem do admin (#alerta) removida');
-            } catch (err) {
-                console.log('⚠️ Não foi possível remover mensagem do admin:', err.message);
-            }
-
-            // Gera lista de menções (todos exceto o bot)
-            const mentions = groupMetadata.participants
-                .filter(p => !p.id.includes(':')) // Remove IDs inválidos
-                .map(p => p.id);
-
-            // Envia regras marcando todos
-            await sock.sendMessage(from, {
-                text: '📢 *ATENÇÃO GERAL*\n📌📜 *REGRAS DO GRUPO (ESSENCIAIS)* 📌 \n\n' +
-                      '┍─━──━─┙💃┕─━──━─┑\n' +
-                   '*1️⃣ Conteúdo permitido e proibido:*\n' +
-                    '🚷 É *proibido* enviar figurinhas, imagens, vídeos ou qualquer outro tipo de conteúdo com crianças, bem como qualquer material que envolva pedofilia, zoofilia, violência, drogas, armas ou gore.\n\n' +
-                    '📸 É *permitido* o envio de fotos sensuais leves, como de calcinha, sutiã ou homens sem camisa/de cueca, com visualização normal.\n\n' +
-                    '🔐 Fotos com seios à mostra ou órgãos genitais (de homens ou mulheres) devem ser enviadas *somente em visualização única*.\n\n' +
-                    '❌ *Proibido* compartilhar conteúdo do grupo para outros grupos e trazer conteúdo de outros grupos para cá.\n\n' +
-                    '*2️⃣ Respeite o espaço de cada um!*\n' +
-                    '🔒 *Não invada* o privado de ninguém sem permissão.\n' +
-                    '📵 É *proibido* fazer chamadas de áudio ou vídeo no grupo.\n\n' +
-                    '*3️⃣ Evite discussões e indiretas!*\n' +
-                    '⚠️ Problemas pessoais se resolvem no *PV (privado)*, não aqui.\n' +
-                    '💔 Evite brigas amorosas no grupo — relacionamentos se resolvem em particular.\n' +
-                    '⚽🚫 É *proibido* discussões sobre futebol, política ou assuntos que causem brigas ou divisões.\n' +
-                    '📸 *Proibido* enviar prints de conversas privadas no grupo.\n\n' +
-                    '*4️⃣ Maturidade acima de tudo!*\n' +
-                    '👥 Se alguém mandou mensagem no privado sem ofensas ou perseguição, *não é caso de exposição* nem de intervenção de admin.\n' +
-                    '🤝 Somos adultos — podemos resolver as coisas com *calma e respeito*.\n\n' +
-                    '*5️⃣ Respeito nas interações!*\n' +
-                    '👋 Ao conversar com alguém que você não conhece, mantenha o *respeito e a educação*.\n' +
-                    '😏 Brincadeiras com teor sexual ou mais íntimas *só se houver liberdade e confiança mútua*.\n' +
-                    '🧩 Conheça a pessoa antes de fazer comentários que possam ser mal interpretados.\n\n' +
-                    '*6️⃣ Reforçando:*\n' +
-                    '🚫 Nada de apologia a pedofilia, zoofilia, violência, drogas ou armas.\n' +
-                    '📵 Nada de chamadas em grupo.\n' +
-                    '🕊️ *Respeito sempre, zoeira com limite!*\n\n' +
-                    '━━━━━━━✦✗✦━━━━━━━━\n\n' +
-                    '_© Damas da Night_',
-                mentions: mentions
-            });
-
-            console.log(`✅ Regras enviadas marcando ${mentions.length} pessoas`);
-            console.log(`[ALERTA] Regras gerais enviadas no grupo: ${groupMetadata.subject}\n`);
-            
-            return true;
-        }
-
-        console.log('🎯 ========= REMOVENDO MENSAGEM =========');
-        console.log('📝 ID da mensagem citada:', targetMessageId);
-        console.log('👤 Autor da mensagem citada:', targetParticipant);
-        
-        // 🔥 BUSCA O NOME REAL DA PESSOA DA MENSAGEM ORIGINAL (igual ao musicaHandler)
-        let targetParticipantName = targetParticipant.split('@')[0];
-        
-        // Tenta buscar o pushName da mensagem citada (nome que aparece no WhatsApp)
-        try {
-            const quotedMsg = msg?.extendedTextMessage?.contextInfo?.quotedMessage;
-            const quotedParticipant = msg?.extendedTextMessage?.contextInfo?.participant;
-            
-            // Se a mensagem citada tem pushName, usa ele
-            if (quotedMsg && quotedParticipant === targetParticipant) {
-                // Busca nos metadados do grupo
-                const participant = groupMetadata.participants.find(p => p.id === targetParticipant);
-                
-                if (participant?.notify) {
-                    targetParticipantName = participant.notify;
-                    console.log('✅ Nome encontrado via notify:', targetParticipantName);
-                } else if (participant?.verifiedName) {
-                    targetParticipantName = participant.verifiedName;
-                    console.log('✅ Nome encontrado via verifiedName:', targetParticipantName);
-                } else if (participant?.name) {
-                    targetParticipantName = participant.name;
-                    console.log('✅ Nome encontrado via name:', targetParticipantName);
-                } else {
-                    // Usa o split padrão se não encontrar
-                    console.log('⚠️ Usando split padrão do JID');
-                }
-            }
-        } catch (err) {
-            console.log('⚠️ Erro ao buscar nome, usando padrão:', err.message);
-        }
-        
-        console.log('📝 Nome final que será exibido:', targetParticipantName);
-        console.log('========================================\n');
-
-        try {
-            // 🔥 USA A MESMA FUNÇÃO ROBUSTA DO ANTILINK
-            
-            // Deleta a mensagem inapropriada usando múltiplas tentativas
-            const messageKeyToDelete = {
-                remoteJid: from,
-                id: targetMessageId,
-                participant: targetParticipant
-            };
-            
-            const success = await deleteMessage(sock, from, messageKeyToDelete);
-            
-            if (success) {
-                console.log('✅ Mensagem inapropriada removida com sucesso');
+        if (contextInfo?.stanzaId && contextInfo?.participant) {
+            if (isValidParticipant(contextInfo.participant)) {
+                targetMessageId = contextInfo.stanzaId;
+                targetParticipant = contextInfo.participant;
             } else {
-                console.log('⚠️ Não foi possível remover a mensagem após múltiplas tentativas');
+                console.log('⚠️ Participante inválido ignorado');
             }
+        }
 
-            // Aguarda um pouco antes de deletar o comando do admin
-            await new Promise(resolve => setTimeout(resolve, 500));
+        if (!targetMessageId || !targetParticipant) {
+            console.log('📢 Enviando regras GERAIS para o grupo');
 
-            // Apaga a mensagem do administrador com #alerta
-            const adminKeyToDelete = {
+            await deleteMessage(sock, from, {
                 remoteJid: from,
                 id: key.id,
                 participant: sender
-            };
-            
-            await deleteMessage(sock, from, adminKeyToDelete);
-            console.log('✅ Mensagem do admin (#alerta) removida');
-
-            // Envia mensagem informativa mencionando o usuário
-            await sock.sendMessage(from, {
-                text: '🚨 *MENSAGEM REMOVIDA*\n\n' +
-                      `⚠️ @${targetParticipantName}, sua mensagem foi apagada por conter *conteúdo inapropriado*.\n\n` +
-                      '⊱⋅ ──────────── ⋅⊰\n' +
-                      '📌📜 *REGRAS DO GRUPO (ESSENCIAIS)* 📌\n\n' +
-                      '*1️⃣ Conteúdo permitido e proibido:*\n' +
-                      '🚷 É *proibido* enviar figurinhas, imagens, vídeos ou qualquer outro tipo de conteúdo com crianças, bem como qualquer material que envolva pedofilia, zoofilia, violência, drogas, armas ou gore.\n\n' +
-                      '📸 É *permitido* o envio de fotos sensuais leves, como de calcinha, sutiã ou homens sem camisa/de cueca, com visualização normal.\n\n' +
-                      '🔐 Fotos com seios à mostra ou órgãos genitais (de homens ou mulheres) devem ser enviadas *somente em visualização única*.\n\n' +
-                      '❌ *Proibido* compartilhar conteúdo do grupo para outros grupos e trazer conteúdo de outros grupos para cá.\n\n' +
-                      '*2️⃣ Respeite o espaço de cada um!*\n' +
-                      '🔒 *Não invada* o privado de ninguém sem permissão.\n' +
-                      '📵 É *proibido* fazer chamadas de áudio ou vídeo no grupo.\n\n' +
-                      '*3️⃣ Evite discussões e indiretas!*\n' +
-                      '⚠️ Problemas pessoais se resolvem no *PV (privado)*, não aqui.\n' +
-                      '💔 Evite brigas amorosas no grupo — relacionamentos se resolvem em particular.\n' +
-                      '⚽🚫 É *proibido* discussões sobre futebol, política ou assuntos que causem brigas ou divisões.\n' +
-                      '📸 *Proibido* enviar prints de conversas privadas no grupo.\n\n' +
-                      '*4️⃣ Maturidade acima de tudo!*\n' +
-                      '👥 Se alguém mandou mensagem no privado sem ofensas ou perseguição, *não é caso de exposição* nem de intervenção de admin.\n' +
-                      '🤝 Somos adultos — podemos resolver as coisas com *calma e respeito*.\n\n' +
-                      '*5️⃣ Respeito nas interações!*\n' +
-                      '👋 Ao conversar com alguém que você não conhece, mantenha o *respeito e a educação*.\n' +
-                      '😏 Brincadeiras com teor sexual ou mais íntimas *só se houver liberdade e confiança mútua*.\n' +
-                      '🧩 Conheça a pessoa antes de fazer comentários que possam ser mal interpretados.\n\n' +
-                      '*6️⃣ Reforçando:*\n' +
-                      '🚫 Nada de apologia a pedofilia, zoofilia, violência, drogas ou armas.\n' +
-                      '📵 Nada de chamadas em grupo.\n' +
-                      '🕊️ *Respeito sempre, zoeira com limite!*\n\n' +
-                      '━━━━━━━✦✗✦━━━━━━━━\n\n' +
-                      '_© Damas da Night_',
-                mentions: [targetParticipant]
             });
 
-            console.log('✅ Aviso de remoção enviado');
-            console.log(`[ALERTA] Mensagem removida no grupo: ${groupMetadata.subject}\n`);
-            
-        } catch (deleteError) {
-            console.error('❌ Erro ao deletar mensagem:', deleteError);
-            await sock.sendMessage(from, { 
-                text: '❌ Erro ao processar o comando. Verifique se o bot tem permissões de administrador.' 
-            }, { quoted: message });
+            const descricao = await getGroupDescription(sock, from);
+            const regras = descricao || '📜 *Regras não disponíveis na descrição do grupo*';
+
+            const mentions = groupMetadata.participants
+                .filter(p => isValidParticipant(p.id))
+                .map(p => p.id);
+
+            await sock.sendMessage(from, {
+                text: `📢 *ATENÇÃO MEMBROS DO GRUPO*\n\n${regras}`,
+                mentions
+            });
+
+            console.log(`✅ Regras enviadas (${mentions.length} menções)`);
+
+            // ⚡ ENVIO IMEDIATO DOS ÁUDIOS
+            await sendAudiosSequencial(sock, from, audios, 0, 3);
+
+            return true;
         }
 
-        return true;
+        console.log('🎯 ADVERTÊNCIA INDIVIDUAL');
+
+        let targetName = targetParticipant.split('@')[0];
+        const participant = groupMetadata.participants.find(p => p.id === targetParticipant);
         
-    } catch (error) {
-        console.error('❌ Erro ao processar comando #alerta:', error);
-        
-        try {
-            await sock.sendMessage(message.key.remoteJid, { 
-                text: '❌ Erro ao processar o comando. Tente novamente.' 
-            }, { quoted: message });
-        } catch (replyError) {
-            console.error('❌ Erro ao enviar mensagem de erro:', replyError);
+        if (participant) {
+            targetName = participant.notify || participant.verifiedName || participant.name || targetName;
         }
-        
+
+        const deleted = await deleteMessage(sock, from, {
+            remoteJid: from,
+            id: targetMessageId,
+            participant: targetParticipant
+        });
+
+        if (deleted) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        await deleteMessage(sock, from, {
+            remoteJid: from,
+            id: key.id,
+            participant: sender
+        });
+
+        // PRIMEIRA MENSAGEM - Aviso imediato
+        await sock.sendMessage(from, {
+            text: `🚨 *MENSAGEM REMOVIDA*\n\n` +
+                  `⚠️ @${targetName}, sua mensagem foi apagada por conter *CONTEÚDO PROIBIDO*.\n\n` +
+                  `📋 Leia atentamente as regras do grupo abaixo.`,
+            mentions: [targetParticipant]
+        });
+
+        console.log(`✅ Aviso enviado para @${targetName}`);
+
+        // SEGUNDA MENSAGEM - Regras completas (IMEDIATO)
+        const descricao = await getGroupDescription(sock, from);
+        const regras = descricao || '📜 *Regras não disponíveis na descrição do grupo*';
+
+        const regrasMessage = await sock.sendMessage(from, {
+            text: `📖 *POR FAVOR, LEIA AS REGRAS DO GRUPO* 📖\n\n` +
+                  `@${targetName}, para mantermos um ambiente saudável e respeitoso, pedimos que você leia atentamente as regras abaixo:\n\n` +
+                  `${regras}\n\n` +
+                  `✅ Seguir estas regras garante uma boa convivência para todos!\n` +
+                  `🤝 Contamos com sua colaboração.`,
+            mentions: [targetParticipant]
+        });
+
+        console.log(`✅ Regras enviadas para @${targetName}`);
+
+        // ⚡ ENVIO IMEDIATO DOS ÁUDIOS (sem setTimeout)
+        await sendAudiosSequencialComResposta(sock, from, audios, 3, 6, regrasMessage, targetParticipant);
+
+        return true;
+
+    } catch (error) {
+        console.error('❌ Erro no alertaHandler:', error);
+        if (CONFIG.DEBUG) console.error(error.stack);
         return false;
     }
 };
 
+// ============================================
+// INICIALIZAÇÃO
+// ============================================
+console.log('🚀 Iniciando carregamento dos áudios...');
+carregarAudios().then(audios => {
+    if (audios && audios.length > 0) {
+        console.log('✅ alertaHandler pronto para uso!');
+    } else {
+        console.warn('⚠️ alertaHandler iniciado, mas nenhum áudio foi carregado');
+    }
+}).catch(error => {
+    console.error('❌ Erro ao inicializar alertaHandler:', error.message);
+});
+
+// ============================================
+// EXPORTAÇÕES
+// ============================================
 export default alertaHandler;
-export { alertaHandler };
+export { 
+    alertaHandler,
+    carregarAudios,
+    sendAudiosSequencialComResposta
+};

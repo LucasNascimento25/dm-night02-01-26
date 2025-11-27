@@ -53,7 +53,7 @@ export async function handleCloseGroup(sock, msg, chatId) {
         await sock.groupSettingUpdate(chatId, 'announcement');
         
         await sock.sendMessage(chatId, {
-            text: '👏🍻 *DﾑMﾑS* 💃🔥 *Dﾑ* *NIGӇԵ*💃🎶🍾🍸\n\n🔒 *Grupo fechado!*\n\nApenas administradores podem enviar mensagens. Use #opengp para reabrir.'
+            text: '👏🍻 *DﾑMﾑS* 💃🔥 *Dﾑ* *NIGӇԵ*💃🎶🍾🍸\n\n🔒 *Grupo fechado!*\n\nApenas administradores podem enviar mensagens. Use #a ou #opengp para reabrir.'
         }, { quoted: msg });
         
     } catch (error) {
@@ -99,8 +99,8 @@ export async function handleGroupCommands(sock, message) {
         
         const command = content.toLowerCase().split(' ')[0];
         
-        // ✅ CORRIGIDO: Só valida comandos específicos, sem logs assustadores
-        if (!['#rlink', '#closegp', '#opengp'].includes(command)) {
+        // ✅ Comandos disponíveis (incluindo atalhos rápidos #f e #a)
+        if (!['#rlink', '#closegp', '#opengp', '#f', '#a'].includes(command)) {
             return false; // Deixa passar para outros handlers
         }
         
@@ -142,9 +142,11 @@ export async function handleGroupCommands(sock, message) {
                 await handleRevokeLink(sock, message, from);
                 break;
             case '#closegp':
+            case '#f': // 🚨 Atalho rápido para fechar
                 await handleCloseGroup(sock, message, from);
                 break;
             case '#opengp':
+            case '#a': // ✅ Atalho rápido para abrir
                 await handleOpenGroup(sock, message, from);
                 break;
         }

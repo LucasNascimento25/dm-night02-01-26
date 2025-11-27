@@ -153,90 +153,145 @@ export async function listBlacklist() {
 
 /**
  * Faz varredura no grupo e remove todos da blacklist
+ * 🔥 VERSÃO SIMPLIFICADA COM DEBUG INTENSIVO
  */
 export async function scanAndRemoveBlacklisted(groupId, bot) {
     try {
-        console.log(`${BOT_TITLE} 🔍 Iniciando varredura no grupo ${groupId}...`);
+        console.log(`\n${'='.repeat(70)}`);
+        console.log(`${BOT_TITLE} 🔍 INICIANDO VARREDURA NO GRUPO`);
+        console.log(`${'='.repeat(70)}`);
+        console.log(`📍 Group ID: ${groupId}\n`);
         
+        // 1. Busca metadados do grupo
         const groupMetadata = await bot.groupMetadata(groupId);
-        const participants = groupMetadata.participants.map(p => p.id);
+        const participants = groupMetadata.participants;
         
-        console.log(`${BOT_TITLE} 👥 Total de participantes: ${participants.length}`);
+        console.log(`👥 Total de participantes: ${participants.length}`);
         
+        // 🔥 DEBUG: Mostra estrutura de UM participante
+        console.log(`\n📊 ===== ESTRUTURA DE UM PARTICIPANTE (EXEMPLO) =====`);
+        console.log(JSON.stringify(participants[0], null, 2));
+        console.log(`${'='.repeat(70)}\n`);
+        
+        // 2. Busca todos os números da blacklist
         const result = await pool.query('SELECT whatsapp_id FROM blacklist');
         const blacklistedNumbers = result.rows.map(r => r.whatsapp_id);
         
-        console.log(`${BOT_TITLE} 🚫 Total na blacklist: ${blacklistedNumbers.length}`);
-        console.log(`${BOT_TITLE} 📋 Números na blacklist:`, blacklistedNumbers);
+        console.log(`🚫 Total na blacklist: ${blacklistedNumbers.length}`);
+        console.log(`📋 Números bloqueados:`, blacklistedNumbers);
         
+        // 3. Processa cada participante
         const toRemove = [];
         
-        // 🔥 Processa cada participante (incluindo LIDs)
-        for (const participant of participants) {
-            console.log(`\n🔍 ===== Verificando participante =====`);
-            console.log(`   📌 Participant ID: ${participant}`);
+        console.log(`\n${'='.repeat(70)}`);
+        console.log(`🔍 VERIFICANDO CADA PARTICIPANTE`);
+        console.log(`${'='.repeat(70)}\n`);
+        
+        for (let i = 0; i < participants.length; i++) {
+            const participant = participants[i];
+            const participantId = participant.id;
             
-            let numberToCheck = participant;
+            console.log(`[${i + 1}/${participants.length}] Verificando: ${participantId}`);
             
-            // Se for LID, resolve para número real
-            if (participant.includes('@lid')) {
-                const participantData = groupMetadata.participants.find(p => p.id === participant);
-                console.log(`   📊 Dados do participante:`, JSON.stringify(participantData, null, 2));
-                
-                // 🔧 CORREÇÃO: Usar 'jid' ao invés de 'phoneNumber'
-                if (participantData?.jid) {
-                    numberToCheck = participantData.jid;
-                    console.log(`   ✅ LID resolvido: ${participant} → ${numberToCheck}`);
-                } else {
-                    console.log(`   ⚠️ LID não tem jid! Usando o participant ID: ${participant}`);
-                }
+            // 🔥 CORREÇÃO: Pega o número real do campo phoneNumber
+            let numberToCheck = participantId;
+            
+            if (participant.phoneNumber) {
+                numberToCheck = participant.phoneNumber;
+                console.log(`   📞 Número real (phoneNumber): ${numberToCheck}`);
+            } else {
+                console.log(`   ⚠️  Sem phoneNumber, usando ID: ${participantId}`);
             }
             
+            // 🔥 Extrai dígitos do número real
             const digits = extractDigits(numberToCheck);
             console.log(`   🔢 Dígitos extraídos: ${digits}`);
-            console.log(`   🔍 Comparando com blacklist:`, blacklistedNumbers);
-            console.log(`   🔍 Array includes check: ${blacklistedNumbers.includes(digits)}`);
             
-            // 🆕 TESTE DIRETO: Procura o número específico
+            // 🔥 Verifica se está na blacklist
             const isBlacklisted = blacklistedNumbers.includes(digits);
-            console.log(`   🎯 Está na blacklist? ${isBlacklisted}`);
+            console.log(`   🎯 Na blacklist? ${isBlacklisted ? '🚨 SIM!' : '✅ Não'}`);
             
             if (isBlacklisted) {
-                toRemove.push(participant); // Adiciona o ID original (LID ou número normal)
-                console.log(`   🚨 ✅ ENCONTRADO NA BLACKLIST: ${participant} (${numberToCheck})`);
-            } else {
-                console.log(`   ✅ Não está na blacklist`);
+                toRemove.push(participantId); // Usa o ID original para remover
+                console.log(`   ⚠️  ADICIONADO À LISTA DE REMOÇÃO!`);
             }
-            console.log(`======================================\n`);
+            
+            console.log('');
         }
         
-        console.log(`${BOT_TITLE} 🎯 Encontrados para remover: ${toRemove.length}`);
+        // 4. Remove os usuários encontrados
+        console.log(`${'='.repeat(70)}`);
+        console.log(`🎯 RESULTADO DA VARREDURA`);
+        console.log(`${'='.repeat(70)}`);
+        console.log(`📊 Total encontrado: ${toRemove.length}`);
         
         if (toRemove.length > 0) {
-            for (const userId of toRemove) {
+            console.log(`📋 Lista de IDs para remover:`);
+            toRemove.forEach((id, i) => {
+                console.log(`   ${i + 1}. ${id}`);
+            });
+            
+            console.log(`\n🚨 INICIANDO REMOÇÕES...\n`);
+            
+            let removidosComSucesso = 0;
+            let erros = 0;
+            
+            for (let i = 0; i < toRemove.length; i++) {
+                const userId = toRemove[i];
+                
                 try {
-                    await bot.groupParticipantsUpdate(groupId, [userId], 'remove');
-                    console.log(`${BOT_TITLE} 🚨 ${userId} foi removido do grupo ${groupId} (estava na blacklist)`);
+                    console.log(`[${i + 1}/${toRemove.length}] Removendo: ${userId}`);
+                    
+                    const removeResult = await bot.groupParticipantsUpdate(groupId, [userId], 'remove');
+                    
+                    console.log(`   ✅ Resultado:`, removeResult);
+                    console.log(`   ✅ REMOVIDO COM SUCESSO!\n`);
+                    
+                    removidosComSucesso++;
+                    
+                    // Delay de 1 segundo entre remoções
                     await new Promise(resolve => setTimeout(resolve, 1000));
+                    
                 } catch (err) {
-                    console.error(`${BOT_TITLE} ❌ Erro ao remover ${userId}:`, err.message);
+                    console.error(`   ❌ ERRO ao remover ${userId}:`);
+                    console.error(`   ❌ Mensagem: ${err.message}`);
+                    console.error(`   ❌ Stack: ${err.stack}\n`);
+                    erros++;
                 }
             }
             
-            return `${BOT_TITLE} ✅ Varredura concluída!\n🚨 ${toRemove.length} usuário(s) da blacklist foram removidos.`;
+            console.log(`${'='.repeat(70)}`);
+            console.log(`✅ VARREDURA FINALIZADA`);
+            console.log(`${'='.repeat(70)}`);
+            console.log(`✅ Removidos: ${removidosComSucesso}`);
+            console.log(`❌ Erros: ${erros}`);
+            console.log(`${'='.repeat(70)}\n`);
+            
+            return `${BOT_TITLE} ✅ Varredura concluída!\n🚨 ${removidosComSucesso} usuário(s) da blacklist foram removidos.${erros > 0 ? `\n⚠️ ${erros} erro(s) ao remover.` : ''}`;
+            
         } else {
+            console.log(`✨ Nenhum usuário da blacklist encontrado!`);
+            console.log(`${'='.repeat(70)}\n`);
+            
             return `${BOT_TITLE} ✅ Varredura concluída!\n✨ Nenhum usuário da blacklist encontrado no grupo.`;
         }
         
     } catch (err) {
-        console.error(`${BOT_TITLE} ❌ Erro ao fazer varredura no grupo ${groupId}:`, err);
+        console.error(`\n${'='.repeat(70)}`);
+        console.error(`❌ ERRO GERAL NA VARREDURA`);
+        console.error(`${'='.repeat(70)}`);
+        console.error(`❌ Group ID: ${groupId}`);
+        console.error(`❌ Erro: ${err.message}`);
+        console.error(`❌ Stack: ${err.stack}`);
+        console.error(`${'='.repeat(70)}\n`);
+        
         return `${BOT_TITLE} ❌ Erro ao fazer varredura no grupo.`;
     }
 }
 
 /**
  * Remove automaticamente usuário blacklist ao entrar no grupo
- * 🔧 VERSÃO COM DEBUG INTENSIVO + SUPORTE A LID
+ * 🔧 VERSÃO COM DEBUG INTENSIVO
  */
 export async function onUserJoined(userId, groupId, bot, originalId = null) {
     try {
@@ -246,22 +301,8 @@ export async function onUserJoined(userId, groupId, bot, originalId = null) {
         console.log('📥 INPUT - groupId:', groupId);
         console.log('📥 INPUT - bot existe?', !!bot);
         
-        // 🆕 BUSCA METADATA DO GRUPO PARA RESOLVER LID
-        const groupMetadata = await bot.groupMetadata(groupId);
-        let numberToCheck = userId;
-        
-        // Se for LID, resolve para número real usando 'jid'
-        if (userId.includes('@lid')) {
-            const participantData = groupMetadata.participants.find(p => p.id === userId);
-            console.log('📊 Dados do participante:', JSON.stringify(participantData, null, 2));
-            
-            if (participantData?.jid) {
-                numberToCheck = participantData.jid;
-                console.log('✅ LID resolvido para:', numberToCheck);
-            }
-        }
-        
-        const digits = extractDigits(numberToCheck);
+        // Extrai dígitos direto do userId
+        const digits = extractDigits(userId);
         console.log('🔄 DÍGITOS EXTRAÍDOS:', digits);
         
         console.log('\n🔍 Chamando isBlacklistedRealtime...');
@@ -274,7 +315,7 @@ export async function onUserJoined(userId, groupId, bot, originalId = null) {
             console.log('\n🚨 =============== USUÁRIO ESTÁ NA BLACKLIST ===============');
             console.log('🎯 Tentando remover...');
             
-            // 🔥 USA O ID ORIGINAL (LID) PARA REMOVER, NÃO O NÚMERO REAL
+            // Usa o ID original se fornecido, senão usa o userId
             const idToRemove = originalId || userId;
             console.log('   - ID para remover:', idToRemove);
             console.log('   - Group ID:', groupId);
@@ -334,7 +375,7 @@ Se você digitar com 55, será tratado como brasileiro.
 Se você digitar SEM 55, será tratado como estrangeiro.
 
 🔍 *Varredura Automática:*
-- O bot faz varredura automática ao entrar no grupo
+- O bot faz varredura automática ao conectar
 - Use #varredura para fazer verificação manual a qualquer momento
 `;
 }

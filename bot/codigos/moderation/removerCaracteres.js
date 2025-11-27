@@ -1,3 +1,5 @@
+//removerCaracteres.js
+
 // MODERAÇÃO AVANÇADA: Remove mensagens longas e usuários problemáticos
 export async function moderacaoAvancada(c, mensagem) {
     const textoMensagem = mensagem.message?.conversation

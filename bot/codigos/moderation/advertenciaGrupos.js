@@ -1,6 +1,11 @@
 import pool from '../../../db.js';
 
 // ============================================
+// IMPORTAÇÃO DO SISTEMA DE ALERTAS
+// ============================================
+import { carregarAudios, sendAudiosSequencialComResposta } from './alertaHandler.js';
+
+// ============================================
 // FUNÇÕES DE BANCO DE DADOS
 // ============================================
 
@@ -99,6 +104,19 @@ async function banUser(sock, groupId, userId) {
   await sock.groupParticipantsUpdate(groupId, [userId], 'remove');
 }
 
+/**
+ * Busca as regras do grupo na descrição
+ */
+async function getGroupDescription(sock, groupId) {
+  try {
+    const metadata = await sock.groupMetadata(groupId);
+    return metadata.desc || '📜 *Regras não disponíveis na descrição do grupo*';
+  } catch (error) {
+    console.error('❌ Erro ao buscar descrição do grupo:', error.message);
+    return '📜 *Regras não disponíveis na descrição do grupo*';
+  }
+}
+
 // ============================================
 // LÓGICA PRINCIPAL DE ADVERTÊNCIAS
 // ============================================
@@ -148,44 +166,62 @@ Mesmo após as advertências anteriores, continuou infringindo as regras estabel
   } 
   // Usuário recebeu advertência
   else {
+    // PRIMEIRA MENSAGEM: Aviso de advertência
     await sendMessage(
       sock,
       groupId,
-      `@${userId.split('@')[0]}, você infringiu uma das regras do grupo e recebeu sua advertência ${count}/3 ⚠️
+      `@${userId.split('@')[0]}, 𝗩𝗢𝗖𝗘 𝗜𝗡𝗙𝗥𝗜𝗡𝗚𝗜𝗨 𝗨𝗠𝗔 𝗗𝗔𝗦 𝗥𝗘𝗚𝗥𝗔𝗦 𝗗𝗢 𝗚𝗥𝗨𝗣𝗢 𝗘 𝗥𝗘𝗖𝗘𝗕𝗘𝗨 𝗦𝗨𝗔 𝗔𝗗𝗩𝗘𝗥𝗧𝗘𝗡𝗖𝗜𝗔.
+ ${count}/3 ⚠️
 
-📋 REGRAS PROIBIDAS:
+⚠️ 𝗔𝗢 𝗔𝗧𝗜𝗡𝗚𝗜𝗥 𝟯 𝗔𝗗𝗩𝗘𝗥𝗧𝗘𝗡𝗖𝗜𝗔𝗦, 𝗩𝗢𝗖𝗘̂ 𝗦𝗘𝗥𝗔 𝗥𝗘𝗠𝗢𝗩𝗜𝗗𝗢 𝗔𝗨𝗧𝗢𝗠𝗔𝗧𝗜𝗖𝗔𝗠𝗘𝗡𝗧𝗘 𝗗𝗢 𝗚𝗥𝗨𝗣𝗢
+🚫👋
 
-❌ INVADIR O PRIVADO DOS MEMBROS SEM PERMISSÃO
-🚫 NÃO É PERMITIDO ACESSAR OU ENVIAR MENSAGENS PARA O PRIVADO DE OUTRO MEMBRO SEM CONSENTIMENTO EXPLÍCITO NO GRUPO
-
-❌ ENVIAR FOTOS OU VÍDEOS DE ÓRGÃOS GENITAIS SEM VISUALIZAÇÃO ÚNICA
-🚫
-
-❌ COMPARTILHAR PRINTS DE CONVERSAS PRIVADAS OU TRAZER ASSUNTOS DO PRIVADO PARA O GRUPO
-💬 NAMOROS, BRIGAS, CIÚMES, ETC.
-
-❌ PUBLICAR IMAGENS, STICKERS OU FIGURINHAS DE CRIANÇAS / CONTEÚDO ENVOLVENDO MENORES
-👶❌
-
-❌ COMPARTILHAR CONTEÚDO RELACIONADO A DROGAS ILÍCITAS
-💊❌
-
-❌ QUALQUER MATERIAL DE PEDOFILIA OU ABUSO INFANTIL
-🚫👶
-
-❌ CONTEÚDO DE VIOLÊNCIA EXPLÍCITA OU GORE
-🔪⚰️❌
-
-❌ DISCURSO DE ÓDIO, RACISMO OU QUALQUER TIPO DE DISCRIMINAÇÃO
-✋🚫
-
-❌ PROMOVER DISCUSSÕES OU BRIGAS NO GRUPO
-🤬⚡
-
-⚠️ AO ATINGIR 3 ADVERTÊNCIAS, VOCÊ SERÁ REMOVIDO AUTOMATICAMENTE DO GRUPO
-🚫👋`,
+📋 Leia as regras do grupo abaixo para evitar futuras penalizações.`,
       userId
     );
+
+    // SEGUNDA MENSAGEM: Regras do grupo (imediatamente)
+    try {
+      const regras = await getGroupDescription(sock, groupId);
+      
+      const regrasMessage = await sock.sendMessage(groupId, {
+        text: `『🕺🍻 𝐑𝐄𝐆𝐑♞𝐒 ҉ 𝐃♛ ҉ 𝐆𝐑𝐔𝐏♛ 💃🍷』 \n\n
+@${userId.split('@')[0]}, por favor leia atentamente as regras abaixo:
+
+
+${regras}`,
+        mentions: [userId]
+      });
+
+      console.log(`✅ Regras enviadas para @${userId.split('@')[0]}`);
+
+      // TERCEIRA PARTE: Enviar 6 áudios imediatamente
+      try {
+        console.log('🎵 Carregando áudios do sistema de alertas...');
+        const audios = await carregarAudios();
+        
+        if (audios && audios.length >= 6) {
+          console.log(`🎵 Enviando 6 áudios para @${userId.split('@')[0]}`);
+          await sendAudiosSequencialComResposta(
+            sock, 
+            groupId, 
+            audios, 
+            3,  // Começa do índice 3 (4º áudio)
+            6,  // Envia 6 áudios
+            regrasMessage,  // Responde a mensagem das regras
+            userId  // Menciona o usuário infrator
+          );
+          console.log('✅ Áudios enviados com sucesso');
+        } else {
+          console.warn('⚠️ Não há áudios suficientes disponíveis');
+        }
+      } catch (error) {
+        console.error('❌ Erro ao enviar áudios:', error);
+      }
+
+    } catch (error) {
+      console.error('❌ Erro ao enviar regras:', error);
+    }
   }
 }
 
@@ -356,4 +392,8 @@ Este recurso é exclusivo dos administradores do grupo.`,
 // EXPORTAÇÃO
 // ============================================
 
-export { handleMessage };
+export { 
+  handleMessage,
+  carregarAudios,
+  sendAudiosSequencialComResposta
+};

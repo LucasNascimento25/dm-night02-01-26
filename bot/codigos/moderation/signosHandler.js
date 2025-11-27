@@ -1,8 +1,8 @@
-// signosHandler.js - Sistema de Signos e Horóscopo Otimizado com Menções
+// signosHandler.js - Versão Otimizada com apenas 3 comandos
 import fetch from 'node-fetch';
 
 const URL_SIGNOS = 'https://raw.githubusercontent.com/LucasNascimento25/signos-taro/main/signos.json';
-const ADMIN_NUMBERS = ['5516981874405', '5521972337640', '5519997998496']; // ⚠️ Lista de números admin
+const ADMIN_NUMBERS = ['5516981874405', '5521972337640', '5519997998496'];
 
 const SIGNOS_MAP = {
     'aries': 'aries', 'áries': 'aries',
@@ -22,20 +22,18 @@ let signos = {};
 let signosCarregados = false;
 let envioEmAndamento = false;
 
-/**
- * Extrai apenas os dígitos do número (adaptado de blacklistFunctions.js)
- */
+// ============================================
+// 🔧 FUNÇÕES AUXILIARES
+// ============================================
+
 function extractDigits(number) {
-    // 🔥 PROTEÇÃO: Se não for string, converte
     if (typeof number !== 'string') {
         console.warn('⚠️ extractDigits recebeu tipo inválido:', typeof number, number);
         return '';
     }
     
-    // Remove tudo que não é dígito
     let digits = number.replace(/@.*$/, '').replace(/\D/g, '');
     
-    // Adiciona 55 se for número brasileiro de 11 dígitos sem código de país
     if (digits.length === 11 && !digits.startsWith('55')) {
         digits = '55' + digits;
     }
@@ -43,7 +41,6 @@ function extractDigits(number) {
     return digits;
 }
 
-// Função para formatar cabeçalho
 const formatarCabecalho = () => 
     'ஓீᤢ✧͢⃟ᤢ̤̤̤̤̤̤̤̤̤̤̤̤̤̤̤̤̤̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̼̬🔮ஓீᤢ✧͢⃟ᤢ̤̤̤̤̤̤̤̤̤̤̤̤̤̤̤̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̼̬🔮ஓீᤢ✧͢⃟ᤢ̤̤̤̤̤̤̤̤̤̤̤̤̤̤̤̤̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̣̼̬🔮\n💃 ⃝⃕፝⃟Oráculo das Damas⸵░⃟☪️\n᭥ꩌ゚໋ ꯴᩠ꦽꦼ⛓️↦᭥ꩌ゚໋ ꯴᩠ꦽꦼ⛓️↦᭥ꩌ゚໋ ꯴᩠ꦽꦼ⛓️\n𝔇𝔞𝔪𝔞𝔰 𝔡𝔞 𝔑𝔦𝔤𝔥𝔱\n🔮 ⃢───𖡜ꦽ̸ོ˚￫───ཹ🔮💃🏻 ݇-݈\n°︠︠︠︠︠︠︠︠𖡬 ᭄\n\n';
 
@@ -53,7 +50,10 @@ const formatarRodape = () => {
     return `\n°︠︠︠︠︠︠︠︠𖡬 ᭄───𖡜ꦽ̸ོ˚￫───ཹ🔮💃\n_${dataFormatada}_\n_© Oráculo das Damas_`;
 };
 
-// Carrega signos do GitHub
+// ============================================
+// 📥 CARREGAMENTO DOS SIGNOS
+// ============================================
+
 export async function carregarSignos() {
     try {
         console.log('🔄 Carregando signos...');
@@ -66,7 +66,6 @@ export async function carregarSignos() {
         
         signos = await response.json();
         
-        // 🔥 VALIDAÇÃO: Verifica se os signos têm a estrutura correta
         console.log('🔍 Validando estrutura dos signos...');
         let validos = 0;
         for (const [key, signo] of Object.entries(signos)) {
@@ -94,12 +93,12 @@ const verificarCarregamento = () => {
     return null;
 };
 
-/**
- * 🔥 FUNÇÃO CORRIGIDA: Resolve LID para número real usando múltiplos métodos
- */
+// ============================================
+// 🔐 VERIFICAÇÃO DE ADMIN
+// ============================================
+
 async function resolverNumeroReal(sock, senderJid, chatJid) {
     try {
-        // Método 1: Se não é LID, retorna direto
         if (!senderJid.includes('@lid')) {
             console.log('✅ Não é LID, usando JID original:', senderJid);
             return senderJid;
@@ -107,24 +106,19 @@ async function resolverNumeroReal(sock, senderJid, chatJid) {
 
         console.log('🔍 Detectado LID, tentando resolver:', senderJid);
 
-        // Método 2: Tenta buscar nos metadados do grupo
         if (chatJid.includes('@g.us')) {
             try {
                 const groupMetadata = await sock.groupMetadata(chatJid);
-                
-                // Busca o participante pelo LID
                 const participant = groupMetadata.participants.find(p => p.id === senderJid);
                 
                 if (participant) {
                     console.log('📋 Participante encontrado:', JSON.stringify(participant, null, 2));
                     
-                    // 🔥 PRIORIDADE: Campo phoneNumber (onde está o número REAL!)
                     if (participant.phoneNumber) {
                         console.log('✅ Número real via phoneNumber:', participant.phoneNumber);
                         return participant.phoneNumber;
                     }
                     
-                    // Tenta diferentes campos onde o número real pode estar
                     if (participant.jid) {
                         console.log('✅ Número real via jid:', participant.jid);
                         return participant.jid;
@@ -146,7 +140,6 @@ async function resolverNumeroReal(sock, senderJid, chatJid) {
             }
         }
 
-        // Método 3: Tenta usar store (se disponível)
         if (sock.store?.contacts?.[senderJid]) {
             const contact = sock.store.contacts[senderJid];
             if (contact.notify || contact.name) {
@@ -155,7 +148,6 @@ async function resolverNumeroReal(sock, senderJid, chatJid) {
             }
         }
 
-        // Método 4: Tenta extrair do próprio LID (alguns casos)
         const lidMatch = senderJid.match(/^(\d+)@lid$/);
         if (lidMatch) {
             const possibleJid = lidMatch[1] + '@s.whatsapp.net';
@@ -172,24 +164,18 @@ async function resolverNumeroReal(sock, senderJid, chatJid) {
     }
 }
 
-/**
- * Verifica se usuário é admin - CORRIGIDO COM ARRAY DE ADMINS
- */
 const verificarAdmin = async (sock, message) => {
     try {
         const senderJid = message.key.participant || message.key.remoteJid;
         const chatJid = message.key.remoteJid;
         
-        // 🔥 USA A NOVA FUNÇÃO DE RESOLUÇÃO
         const numeroReal = await resolverNumeroReal(sock, senderJid, chatJid);
         
         console.log('🔍 ========= Verificando Admin (Signos) =========');
         console.log('📥 Remetente JID original:', senderJid);
         console.log('📥 Número real resolvido:', numeroReal);
-        console.log('🔍 Tipo do numeroReal:', typeof numeroReal);
         console.log('📥 Chat JID:', chatJid);
         
-        // 🔥 EXTRAI DÍGITOS COM VALIDAÇÃO DE TIPO
         const numero = extractDigits(numeroReal);
         
         if (!numero) {
@@ -198,7 +184,6 @@ const verificarAdmin = async (sock, message) => {
             return false;
         }
         
-        // 🔥 VERIFICA SE ESTÁ NO ARRAY DE ADMINS
         const isAdmin = ADMIN_NUMBERS.some(adminNum => {
             const adminNumero = extractDigits(adminNum);
             console.log(`   🔍 Comparando: ${numero} === ${adminNumero}`);
@@ -217,9 +202,10 @@ const verificarAdmin = async (sock, message) => {
     }
 };
 
-/**
- * Obtém lista de participantes do grupo (mesmo esquema do AutoTagHandler)
- */
+// ============================================
+// 📨 FUNÇÕES DE ENVIO
+// ============================================
+
 async function obterParticipantesGrupo(sock, jid) {
     try {
         if (!jid.endsWith('@g.us')) {
@@ -238,9 +224,6 @@ async function obterParticipantesGrupo(sock, jid) {
     }
 }
 
-/**
- * Envia todos os signos com intervalo de 2 SEGUNDOS e MENÇÕES NO POSTER INICIAL
- */
 async function enviarSignosCompletos(sock, jid) {
     if (envioEmAndamento) {
         return '⚠️ Já existe um envio em andamento. Aguarde a conclusão.';
@@ -254,16 +237,13 @@ async function enviarSignosCompletos(sock, jid) {
     try {
         const listaSignos = Object.values(signos);
         
-        // 🔥 VALIDAÇÃO: Verifica se há signos carregados
         if (listaSignos.length === 0) {
             throw new Error('Nenhum signo foi carregado!');
         }
         
-        // 🔥 DEBUG: Log dos signos
         console.log(`📊 Total de signos a enviar: ${listaSignos.length}`);
         console.log(`🔍 Primeiro signo:`, listaSignos[0]);
         
-        // Obtém participantes para mencionar
         const mentions = await obterParticipantesGrupo(sock, jid);
         
         console.log(`\n🏷️ ========= POSTER COM MENÇÕES =========`);
@@ -272,7 +252,7 @@ async function enviarSignosCompletos(sock, jid) {
         console.log(`🕒 ${new Date().toLocaleString('pt-BR')}`);
         console.log(`========================================\n`);
         
-        // Envia poster inicial com menções
+        // Poster inicial com menções
         await sock.sendMessage(jid, { 
             text: formatarCabecalho() + 
                   `🔮 *ENVIANDO SIGNOS DO DIA* 🔮\n\n` +
@@ -281,14 +261,12 @@ async function enviarSignosCompletos(sock, jid) {
             mentions: mentions
         });
 
-        // Aguarda 2 segundos antes de começar
         await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Envia cada signo
         for (let i = 0; i < listaSignos.length; i++) {
             const s = listaSignos[i];
             
-            // 🔥 VALIDAÇÃO: Verifica se o signo tem todas as propriedades
             if (!s.nome || !s.simbolo || !s.carta || !s.previsao || !s.conselho) {
                 console.warn(`⚠️ Signo ${i} incompleto, pulando:`, s);
                 continue;
@@ -305,13 +283,11 @@ async function enviarSignosCompletos(sock, jid) {
             
             console.log(`✅ Signo ${i + 1}/${listaSignos.length} enviado: ${s.nome}`);
             
-            // Intervalo de 2 SEGUNDOS entre cada signo
             if (i < listaSignos.length - 1) {
                 await new Promise(resolve => setTimeout(resolve, 2000));
             }
         }
 
-        // Aguarda 2 segundos antes da mensagem final
         await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Mensagem final
@@ -340,36 +316,33 @@ async function enviarSignosCompletos(sock, jid) {
     }
 }
 
-// Lista todos os signos
-export function listarSignos() {
-    const erro = verificarCarregamento();
-    if (erro) return erro;
-    
-    let msg = formatarCabecalho() + '🌟 *SIGNOS DISPONÍVEIS* 🌟\n\n';
-    
-    Object.values(signos).forEach(s => {
-        if (s.nome && s.simbolo) {
-            msg += `${s.simbolo} *${s.nome}*\n`;
-        }
-    });
-    
-    msg += '\n💫 Digite *!signo [nome]* para ver sua previsão\n📝 Exemplo: !signo aries\n' + formatarRodape();
-    return msg;
-}
+// ============================================
+// 🔍 OBTER SIGNO ESPECÍFICO
+// ============================================
 
-// Obtém um signo específico
 export function obterSigno(nome) {
     const erro = verificarCarregamento();
     if (erro) return { sucesso: false, mensagem: erro };
     
     const key = SIGNOS_MAP[nome.toLowerCase().trim()];
     if (!key || !signos[key]) {
-        return { sucesso: false, mensagem: '❌ Signo não encontrado!\n\nUse *!listasignos* para ver todos os signos.' };
+        return { 
+            sucesso: false, 
+            mensagem: formatarCabecalho() +
+                     '❌ *SIGNO NÃO ENCONTRADO* ❌\n\n' +
+                     '🔮 _As Damas não reconhecem este signo..._\n\n' +
+                     '💫 *Signos disponíveis:*\n' +
+                     'Áries, Touro, Gêmeos, Câncer, Leão,\n' +
+                     'Virgem, Libra, Escorpião, Sagitário,\n' +
+                     'Capricórnio, Aquário, Peixes\n\n' +
+                     '📝 *Use:* !signo [nome]\n' +
+                     '✨ *Exemplo:* !signo aries\n' +
+                     formatarRodape()
+        };
     }
 
     const s = signos[key];
     
-    // 🔥 VALIDAÇÃO
     if (!s.nome || !s.simbolo || !s.carta || !s.previsao || !s.conselho) {
         return { sucesso: false, mensagem: '❌ Signo incompleto!\n\nTente novamente ou use outro comando.' };
     }
@@ -384,48 +357,10 @@ export function obterSigno(nome) {
     return { sucesso: true, mensagem: msg, signo: s };
 }
 
-// Signo aleatório
-export function signoAleatorio() {
-    const erro = verificarCarregamento();
-    if (erro) return { sucesso: false, mensagem: erro };
-    
-    const keys = Object.keys(signos);
-    const s = signos[keys[Math.floor(Math.random() * keys.length)]];
-    
-    // 🔥 VALIDAÇÃO
-    if (!s.nome || !s.simbolo || !s.carta || !s.previsao || !s.conselho) {
-        return { sucesso: false, mensagem: '❌ Erro ao carregar signo aleatório!' };
-    }
-    
-    const msg = formatarCabecalho() +
-        '🎲 *SIGNO ALEATÓRIO* 🎲\n\n' +
-        `${s.simbolo} *${s.nome}* ${s.simbolo}\n\n` +
-        `🃏 *Carta do Dia:* ${s.carta}\n\n` +
-        `🌟 *Previsão:*\n${s.previsao}\n\n` +
-        `💡 *Conselho:*\n${s.conselho}\n` +
-        formatarRodape();
+// ============================================
+// 🎯 HANDLER PRINCIPAL - APENAS 3 COMANDOS
+// ============================================
 
-    return { sucesso: true, mensagem: msg, signo: s };
-}
-
-// Horóscopo completo
-export function horoscopoCompleto() {
-    const erro = verificarCarregamento();
-    if (erro) return erro;
-    
-    let msg = formatarCabecalho() + '✨ *HORÓSCOPO COMPLETO* ✨\n\n';
-    
-    Object.values(signos).forEach((s, i, arr) => {
-        if (s.nome && s.simbolo && s.carta && s.previsao) {
-            msg += `${s.simbolo} *${s.nome}*\n🃏 ${s.carta}\n${s.previsao}`;
-            if (i < arr.length - 1) msg += '\n\n───────────────\n\n';
-        }
-    });
-    
-    return msg + formatarRodape();
-}
-
-// Handler principal
 export async function handleSignos(sock, message) {
     try {
         const texto = message.message?.conversation || 
@@ -437,7 +372,9 @@ export async function handleSignos(sock, message) {
         const cmd = texto.toLowerCase().trim();
         const jid = message.key.remoteJid;
         
-        // 🔥 COMANDO PRINCIPAL: #damastaro (APAGA E ENVIA)
+        // ============================================
+        // 1️⃣ COMANDO: #damastaro (Admin - Envio Completo)
+        // ============================================
         if (cmd === '#damastaro') {
             const isAdmin = await verificarAdmin(sock, message);
             
@@ -458,18 +395,15 @@ export async function handleSignos(sock, message) {
                 return true;
             }
             
-            // 🔥 DELETA O COMANDO IMEDIATAMENTE
+            // Deleta o comando
             console.log('🗑️ Tentando deletar comando #damastaro...');
             try {
-                await sock.sendMessage(jid, { 
-                    delete: message.key 
-                });
+                await sock.sendMessage(jid, { delete: message.key });
                 console.log('✅ Comando #damastaro deletado com sucesso!');
             } catch (error) {
                 console.error('❌ Erro ao deletar mensagem:', error);
             }
             
-            // Aguarda 1 segundo antes de iniciar envio
             await new Promise(resolve => setTimeout(resolve, 1000));
             
             const resultado = await enviarSignosCompletos(sock, jid);
@@ -479,7 +413,9 @@ export async function handleSignos(sock, message) {
             return true;
         }
 
-        // Comando de atualização (também restrito a admin)
+        // ============================================
+        // 2️⃣ COMANDO: #atualizarsignos (Admin)
+        // ============================================
         if (cmd === '#atualizarsignos') {
             const isAdmin = await verificarAdmin(sock, message);
             
@@ -516,49 +452,13 @@ export async function handleSignos(sock, message) {
             return true;
         }
 
-        // Comandos públicos
-        const comandos = {
-            '!listasignos': () => listarSignos(),
-            '!listarsignos': () => listarSignos(),
-            '!mysignos': () => listarSignos(),
-            '!signos': () => listarSignos(),
-            '!horoscopo': () => horoscopoCompleto(),
-            '!horoscopocompleto': () => horoscopoCompleto(),
-            '!signoaleatorio': () => signoAleatorio().mensagem,
-            '!signo aleatorio': () => signoAleatorio().mensagem,
-            '!ajudahoroscopo': () => 
-                '🔮 *COMANDOS DE HORÓSCOPO*\n\n' +
-                '*!listasignos* - Lista todos\n' +
-                '*!signo [nome]* - Ver previsão\n' +
-                '*!signoaleatorio* - Aleatório\n' +
-                '*!horoscopo* - Completo\n' +
-                '*!atualizarhoroscopo* - Atualizar\n\n' +
-                '✨ Exemplos:\n!signo aries\n!signo leão'
-        };
-
-        // Comandos diretos
-        if (comandos[cmd]) {
-            await sock.sendMessage(jid, { text: comandos[cmd]() }, { quoted: message });
-            return true;
-        }
-
-        // !signo [nome]
+        // ============================================
+        // 3️⃣ COMANDO: !signo [nome] (Público)
+        // ============================================
         if (cmd.startsWith('!signo ')) {
             const nome = texto.substring(7).trim();
             const res = obterSigno(nome);
             await sock.sendMessage(jid, { text: res.mensagem }, { quoted: message });
-            return true;
-        }
-
-        // !atualizarhoroscopo (público)
-        if (cmd === '!atualizarhoroscopo') {
-            await sock.sendMessage(jid, { text: '🔄 Atualizando...' }, { quoted: message });
-            try {
-                await carregarSignos();
-                await sock.sendMessage(jid, { text: `✅ Signos atualizados!\n⏰ ${new Date().toLocaleString('pt-BR')}` }, { quoted: message });
-            } catch (error) {
-                await sock.sendMessage(jid, { text: `❌ Erro: ${error.message}` }, { quoted: message });
-            }
             return true;
         }
 

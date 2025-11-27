@@ -5,8 +5,6 @@ import { handleGroupCommands } from "../../utils/redefinirFecharGrupo.js";
 import alertaHandler from '../../moderation/alertaHandler.js';
 import { 
     handleSignosCommands,
-    handleContosCommands,
-    handleHQsCommands,
     handleMenuDamas,
     handleBlacklistGroup,
     handleVarreduraCommand,
@@ -45,11 +43,6 @@ export async function processCommandPriorities(
 
     // 🌟 PRIORIDADES 6-12: OUTROS COMANDOS
     if (!handled) handled = await handleSignosCommands(sock, message, content, from);
-    
-    // ⚠️ CRÍTICO: HQs ANTES de Contos (evita conflito #random vs #randomhq)
-    if (!handled) handled = await handleHQsCommands(sock, message, content);
-    if (!handled) handled = await handleContosCommands(sock, message, content);
-    
     if (!handled) handled = await handleMenuDamas(sock, message, content, from);
     if (!handled) handled = await handleBlacklistGroup(sock, from, userId, content, message);
     if (!handled) handled = await handleVarreduraCommand(sock, message, content, from, userId);

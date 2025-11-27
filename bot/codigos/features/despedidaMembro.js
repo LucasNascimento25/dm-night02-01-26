@@ -47,70 +47,89 @@ async function sendMediaWithThumbnail(sock, jid, buffer, caption, mentions = [])
         });
     } catch (err) {
         console.error('Erro ao enviar mídia com thumbnail:', err);
-        // fallback: envia apenas texto
         await sock.sendMessage(jid, { text: caption, mentions });
     }
+}
+
+/**
+ * Extrai apenas o número do JID
+ * @param {string} jid - JID completo
+ * @returns {string} - Apenas a parte numérica
+ */
+function extrairNumeroJID(jid) {
+    if (!jid) return '';
+    return jid.split('@')[0];
+}
+
+/**
+ * Normaliza JID para comparação removendo sufixos
+ * @param {string} jid - JID completo
+ * @returns {string} - ID base sem sufixo
+ */
+function normalizarParaComparacao(jid) {
+    if (!jid) return '';
+    return jid.replace(/@s\.whatsapp\.net|@lid/g, '');
 }
 
 /**
  * Configura mensagens de despedida para participantes que saem do grupo
  * @param {object} socket - instância do Baileys
  * @param {string} groupId - ID do grupo
- * @param {string} participant - ID do participante
- * @param {string} action - Ação realizada: 'remove' ou 'leave'
+ * @param {object} participantData - Objeto com dados do participante
+ * @param {string} action - Ação realizada
+ * @param {string} author - Quem executou a ação
  */
-export const configurarDespedida = async (socket, groupId, participant, action, author) => {
+export const configurarDespedida = async (socket, groupId, participantData, action, author) => {
     try {
-        const participantName = participant.split('@')[0];
-        const authorName = author ? author.split('@')[0] : 'desconhecido';
+        let participantId, participantPhone;
         
-        console.log(`\n========================================`);
-        console.log(`📋 EVENTO DE DESPEDIDA DETECTADO`);
-        console.log(`========================================`);
-        console.log(`👤 Participante: ${participantName}`);
-        console.log(`👮 Author (quem executou): ${authorName}`);
-        console.log(`🔔 Ação recebida: "${action}"`);
-        console.log(`📍 Grupo ID: ${groupId}`);
-        console.log(`⏰ Timestamp: ${new Date().toLocaleString('pt-BR')}`);
-        console.log(`========================================\n`);
-        
-        // 🔥 LÓGICA CORRIGIDA: Verifica se foi saída voluntária
-        // Se o author é o mesmo que o participant, a pessoa saiu por conta própria
-        const saiuVoluntariamente = author === participant;
-        
-        console.log(`🤔 Verificando tipo de saída...`);
-        console.log(`   Author: ${author}`);
-        console.log(`   Participant: ${participant}`);
-        console.log(`   São iguais? ${saiuVoluntariamente ? 'SIM ✅' : 'NÃO ❌'}`);
-        
-        if (!saiuVoluntariamente) {
-            console.log(`❌ Participante ${participantName} foi REMOVIDO por outra pessoa. Despedida NÃO será enviada.`);
-            return;
+        if (typeof participantData === 'object' && participantData !== null) {
+            participantId = participantData.id || participantData.phoneNumber;
+            participantPhone = participantData.phoneNumber || participantData.id;
+        } else {
+            participantId = participantData;
+            participantPhone = participantData;
         }
+        
+        const participantIdNormalizado = normalizarParaComparacao(participantId);
+        const authorIdNormalizado = normalizarParaComparacao(author);
+        const participantPhoneNumber = extrairNumeroJID(participantPhone);
+        
+        const isUserLeftByThemselves = participantIdNormalizado === authorIdNormalizado;
 
-        console.log(`✅ Participante ${participantName} saiu VOLUNTARIAMENTE. Enviando despedida...`);
+        // ✅ CORREÇÃO: Define participantName ANTES de usar nas mensagens
+        const participantName = participantPhoneNumber;
 
         // Lista de URLs de imagens/GIFs de despedida
         const farewellImages = [
-            'https://i.ibb.co/xtKzJzKt/Image-fx-2.jpg',
-            'https://i.ibb.co/Y41G1NGd/Image-fx-3.jpg',
-            'https://i.ibb.co/DDptLjRg/Image-fx.jpg',
-            'https://i.ibb.co/b5g31h4y/Image-fx-1.jpg',
-            'https://i.ibb.co/sdtLqqQf/Image-fx-5.jpg',
-            'https://i.ibb.co/DPnhbcL7/Image-fx-6.jpg',
-            'https://i.ibb.co/60MggsZh/Image-fx-7.jpg',
-            'https://i.ibb.co/VWFZJnbr/Image-fx-8.jpg',
-            'https://i.ibb.co/5hpbChhV/Image-fx-4.jpg',
-            'https://i.ibb.co/VYjr2myr/Image-fx-9.jpg',
-            'https://i.ibb.co/3ypSS9wf/Image-fx-10.jpg',
-            'https://i.ibb.co/8Ltd1KwY/Image-fx-11.jpg',
-            'https://i.ibb.co/r2YksjnG/Image-fx-12.jpg',
-            'https://i.ibb.co/tTv7bJC8/Image-fx-13.jpg'
-        ];
+    'https://i.ibb.co/gLjgmCyd/image1.png',
+    'https://i.ibb.co/pjBZ0rfD/image2.png',
+    'https://i.ibb.co/6J4TpLc1/image3.png',
+    'https://i.ibb.co/WWkCmMWW/image4.png',
+    'https://i.ibb.co/mCbwPggN/image5.png',
+    'https://i.ibb.co/9HyFjFWH/image6.png',
+    'https://i.ibb.co/qVMzLsg/image7.png',
+    'https://i.ibb.co/hJq3QkrM/image8.png',
+    'https://i.ibb.co/W4KfdJp8/image9.png',
+    'https://i.ibb.co/1f5sYpZm/image10.png',
+    'https://i.ibb.co/fLN0W4Z/image11.png',
+    'https://i.ibb.co/ds2JHL60/image12.png',
+    'https://i.ibb.co/tMFR5FH0/image13.png',
+    'https://i.ibb.co/VsFKgwg/image14.png',
+    'https://i.ibb.co/tphc3nYt/image15.png',
+    'https://i.ibb.co/G3Ntnzxj/image16.png',
+    'https://i.ibb.co/Qj9Qn7w0/image17png.png',
+    'https://i.ibb.co/BHBtSW9z/image18png.png',
+    'https://i.ibb.co/wN3YQPjW/image20.png',
+    'https://i.ibb.co/LzG43fhG/image21png.png',
+    'https://i.ibb.co/v6602PT4/image22.png',
+    'https://i.ibb.co/QvfxtSk6/image23.png',
+    'https://i.ibb.co/PGbKpKss/image24.png'
+];
 
-        // Lista de mensagens de despedida (apenas 2)
+
+        // Lista de mensagens de despedida
         const farewellMessages = [
-
         `💔 *Pior que "quem é você?"* @${participantName}\nO grupo vai ficar mais leve agora, e talvez até com mais inteligência.😏😹\nBoa sorte no mundo real! 😹`,
         `🙋‍♀️💔 *Tchau, tá complicado te encontrar aqui!* @${participantName}\nSuas mensagens eram como Wi-Fi sem sinal...\nSempre ausentes quando mais precisamos. 🛑📶`,
         `😭 Adeus, expert em "não vi a mensagem" @${participantName}\nVocê é tipo aquele amigo que vai embora antes de todo mundo e ainda deixa a casa bagunçada! 😂🏃‍♂️`,
@@ -140,8 +159,8 @@ export const configurarDespedida = async (socket, groupId, participant, action, 
         `😭 *Volta logo, ou não* @${participantName}\nTe mandaram embora ou você se mandou sozinho(a)❓\nFica a dúvida! 😂`,
         `😭👋 *Adeus, você foi uma memória passageira* @${participantName}\nMal entrou e já foi embora.\nFica a saudade... ou não! 😏😹`,
         `💔 *Tchau, ausente* @${participantName}\nJá fez o "oi", o "tchau" e desapareceu com mais classe do que eu. Respeito! 😹👏`,
-        `😭 *O grupo agora vai ficar mais chato* @${participantName}\nNão vai ser o mesmo sem as suas mensagens de “não sei o que fazer aqui” 🤔`,
-        `😭👋 *Adeus, o mestre do “nada para fazer aqui”* @${participantName}\nSua mensagem era mais rara do que uma chuva no deserto.\nBoa sorte aí! 🏜️`,
+        `😭 *O grupo agora vai ficar mais chato* @${participantName}\nNão vai ser o mesmo sem as suas mensagens de "não sei o que fazer aqui" 🤔`,
+        `😭👋 *Adeus, o mestre do "nada para fazer aqui"* @${participantName}\nSua mensagem era mais rara do que uma chuva no deserto.\nBoa sorte aí! 🏜️`,
         `💔 *Tchau, mestre das desculpas!* @${participantName} \n Mais uma desculpa sua foi pro espaço.\nDeixa a gente aqui, tentando entender como alguém sumiu tão rápido! 🚀`,
         `😭 *Até mais, especialista em sumir na hora certa!* @${participantName}\nVocê estava mais sumido(a) que aquela pessoa que só aparece no final do rolê. 😅`,
         `🙋‍♀️💔 *Adeus, você é tipo Wi-Fi ruim* @${participantName}\nSempre fora de alcance quando mais precisamos.\nVai com Deus e uma conexão melhor! 😹`,
@@ -199,27 +218,19 @@ export const configurarDespedida = async (socket, groupId, participant, action, 
         `🌙⭐ *Estrela cadente versão turtle!* @${participantName}\nCaiu devagar, não brilhou nada, e ninguém fez pedido! 💫\nTchau, meteorito meia-boca! 🪨😂`,
         `🎺📯 *A fanfarra desistiu!* @${participantName}\nAté a banda parou de tocar quando você saiu... de alívio! 🎵\nMenos um pra desafinar! 😹🎶`,
         `🦖💤 *Dormiu na era do gelo!* @${participantName}\nVocê hibernou tanto que perdeu todas as estações! ❄️🌸☀️🍂\nAcorda em 2077! 🤖😂`
+        ];
 
-    ];
-
-        // Seleciona aleatoriamente uma imagem e uma mensagem
+        // Seleciona imagem e mensagem aleatórias
         const randomImage = farewellImages[Math.floor(Math.random() * farewellImages.length)];
-        const randomFarewellMessage = farewellMessages[Math.floor(Math.random() * farewellMessages.length)];
-        
-        console.log(`🖼️ Imagem selecionada: ${randomImage}`);
-        console.log(`💬 Mensagem: ${randomFarewellMessage.substring(0, 50)}...`);
-        console.log("📤 Enviando GIF/imagem e mensagem de despedida...");
+        const randomMessage = farewellMessages[Math.floor(Math.random() * farewellMessages.length)];
 
-        // Baixa a imagem/GIF como buffer
+        // Baixa e envia a imagem com mensagem
         const res = await axios.get(randomImage, { responseType: 'arraybuffer' });
         const buffer = Buffer.from(res.data, 'binary');
 
-        // Envia a imagem/GIF com thumbnail
-        await sendMediaWithThumbnail(socket, groupId, buffer, randomFarewellMessage, [participant]);
-
-        console.log("✅ GIF/imagem e mensagem de despedida enviados com sucesso!\n");
+        await sendMediaWithThumbnail(socket, groupId, buffer, randomMessage, [participantPhone]);
+        
     } catch (error) {
-        console.error('❌ Erro ao processar a despedida:', error.message || error);
-        console.error('Stack trace:', error.stack);
+        console.error('Erro ao processar despedida:', error.message);
     }
 };

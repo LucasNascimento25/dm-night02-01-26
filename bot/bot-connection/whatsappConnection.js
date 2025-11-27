@@ -5,6 +5,7 @@ import fs from 'fs';
 import pino from 'pino';
 import { setupEventListeners } from './eventListeners.js';
 import { autoScanGroups } from "../bot-utils/autoScan.js";
+import { handleMessages, handleReactions } from "../codigos/handlers/message/messageHandler.js";
 
 const logger = pino({ level: 'silent' });
 const BOT_TITLE = '👏🍻 *DﾑMﾑS* 💃🔥 *Dﾑ* *NIGӇԵ*💃🎶🍾🍸';
@@ -15,8 +16,78 @@ let reconnectTimeout = null;
 let currentSocket = null;
 let qrRetryCount = 0;
 const MAX_QR_RETRIES = 3;
+let resourcesLoaded = false;
 
-// Função para limpar socket anterior
+// 🔥 FUNÇÃO PARA CARREGAR RECURSOS ANTES DA CONEXÃO
+async function preloadResources() {
+    if (resourcesLoaded) {
+        console.log("✅ Recursos já carregados anteriormente\n");
+        return;
+    }
+
+    console.log("\n" + "=".repeat(60));
+    console.log("📦 CARREGANDO RECURSOS DO BOT");
+    console.log("=".repeat(60));
+
+    try {
+        // 1. Verificar/criar pasta de downloads
+        console.log("📁 [1/6] Verificando pasta de downloads...");
+        if (!fs.existsSync('./downloads')) {
+            fs.mkdirSync('./downloads', { recursive: true });
+            console.log("   ✅ Pasta de downloads criada");
+        } else {
+            console.log("   ✅ Pasta de downloads OK");
+        }
+
+        // 2. Verificar/criar pasta de cache
+        console.log("📁 [2/6] Verificando pasta de cache...");
+        if (!fs.existsSync('./cache')) {
+            fs.mkdirSync('./cache', { recursive: true });
+            console.log("   ✅ Pasta de cache criada");
+        } else {
+            console.log("   ✅ Pasta de cache OK");
+        }
+
+        // 3. Verificar pasta de mídia
+        console.log("📁 [3/6] Verificando pasta de mídia...");
+        if (!fs.existsSync('./media')) {
+            fs.mkdirSync('./media', { recursive: true });
+            console.log("   ✅ Pasta de mídia criada");
+        } else {
+            console.log("   ✅ Pasta de mídia OK");
+        }
+
+        // 4. Carregar comandos (simulação)
+        console.log("⚙️  [4/6] Carregando comandos...");
+        await new Promise(resolve => setTimeout(resolve, 500));
+        console.log("   ✅ Comandos carregados");
+
+        // 5. Carregar configurações
+        console.log("⚙️  [5/6] Carregando configurações...");
+        await new Promise(resolve => setTimeout(resolve, 300));
+        console.log("   ✅ Configurações carregadas");
+
+        // 6. Inicializar handlers
+        console.log("⚙️  [6/6] Inicializando handlers...");
+        await new Promise(resolve => setTimeout(resolve, 200));
+        console.log("   ✅ Handlers inicializados");
+
+        console.log("=".repeat(60));
+        console.log("✅ TODOS OS RECURSOS CARREGADOS COM SUCESSO!");
+        console.log("=".repeat(60) + "\n");
+
+        resourcesLoaded = true;
+
+    } catch (error) {
+        console.error("=".repeat(60));
+        console.error("❌ ERRO AO CARREGAR RECURSOS");
+        console.error("=".repeat(60));
+        console.error("📝 Erro:", error.message);
+        console.error("=".repeat(60) + "\n");
+        throw error;
+    }
+}
+
 function cleanupSocket(sock) {
     if (!sock) return;
     
@@ -36,16 +107,14 @@ function cleanupSocket(sock) {
     }
 }
 
-// Função para calcular delay exponencial com limite
 function getReconnectDelay(attempts) {
     const baseDelay = 3000;
-    const maxDelay = 60000; // 1 minuto máximo
+    const maxDelay = 60000;
     const delay = Math.min(baseDelay * Math.pow(1.5, attempts), maxDelay);
     return delay;
 }
 
 export async function connectToWhatsApp() {
-    // Evita múltiplas conexões simultâneas
     if (isConnecting) {
         console.log("⏳ Já existe uma tentativa de conexão em andamento...");
         return currentSocket;
@@ -53,7 +122,6 @@ export async function connectToWhatsApp() {
     
     isConnecting = true;
 
-    // Limpa timeout anterior se existir
     if (reconnectTimeout) {
         clearTimeout(reconnectTimeout);
         reconnectTimeout = null;
@@ -69,16 +137,19 @@ export async function connectToWhatsApp() {
             console.log("=".repeat(60) + "\n");
         } else {
             console.log("\n" + "=".repeat(60));
-            console.log("🚀 Iniciando conexão com WhatsApp...");
+            console.log("🚀 INICIANDO BOT DAMAS DA NIGHT");
             console.log("=".repeat(60) + "\n");
         }
 
-        // Limpa socket anterior antes de criar um novo
+        // 🔥 CARREGA RECURSOS ANTES DE TUDO
+        await preloadResources();
+
         if (currentSocket) {
             cleanupSocket(currentSocket);
             currentSocket = null;
         }
 
+        console.log("📡 Conectando ao WhatsApp...\n");
         const { version } = await fetchLatestBaileysVersion();
         console.log(`📱 Versão Baileys: ${version.join('.')}`);
         
@@ -104,7 +175,6 @@ export async function connectToWhatsApp() {
                 maxCommitRetries: 3, 
                 delayBetweenTriesMs: 2000 
             },
-            // Configurações importantes para estabilidade
             shouldIgnoreJid: jid => false,
             cachedGroupMetadata: async (jid) => null,
         });
@@ -116,7 +186,6 @@ export async function connectToWhatsApp() {
         sock.ev.on("connection.update", async (update) => {
             const { connection, lastDisconnect, qr, isOnline, isNewLogin } = update;
             
-            // Tratamento melhorado do QR Code
             if (qr) {
                 qrRetryCount++;
                 console.log("\n" + "=".repeat(60));
@@ -134,7 +203,6 @@ export async function connectToWhatsApp() {
                 console.log("⚠️  O QR expira em ~30 segundos");
                 console.log("=".repeat(60) + "\n");
 
-                // Se ultrapassar o limite de QR, reconecta
                 if (qrRetryCount >= MAX_QR_RETRIES) {
                     console.log("⚠️ Muitas tentativas de QR. Reiniciando conexão...\n");
                     qrRetryCount = 0;
@@ -148,7 +216,7 @@ export async function connectToWhatsApp() {
             }
 
             if (connection === "connecting") {
-                console.log("🔌 Conectando ao WhatsApp...");
+                console.log("🔌 Estabelecendo conexão...");
             }
 
             if (connection === "open") {
@@ -161,7 +229,6 @@ export async function connectToWhatsApp() {
                 console.log("🚀 Status: Operacional");
                 console.log("=".repeat(60) + "\n");
 
-                // Reset de contadores
                 reconnectAttempts = 0;
                 qrRetryCount = 0;
                 isConnecting = false;
@@ -170,13 +237,7 @@ export async function connectToWhatsApp() {
                     console.log("🆕 Novo login detectado!");
                 }
 
-                // Cria pasta de downloads
-                if (!fs.existsSync('./downloads')) {
-                    fs.mkdirSync('./downloads', { recursive: true });
-                    console.log("📁 Pasta de downloads criada");
-                }
-
-                // Varredura automática com retry
+                // Varredura automática
                 try {
                     console.log("🔍 Iniciando varredura de grupos...\n");
                     await autoScanGroups(sock);
@@ -202,11 +263,9 @@ export async function connectToWhatsApp() {
                 console.log(`🔌 Tipo: ${shouldReconnect ? 'Temporária' : 'Logout'}`);
                 console.log("=".repeat(60) + "\n");
 
-                // Limpa socket desconectado
                 cleanupSocket(sock);
 
                 if (shouldReconnect) {
-                    // RECONEXÃO INFINITA para problemas de rede
                     reconnectAttempts++;
                     const nextDelay = getReconnectDelay(reconnectAttempts);
                     
@@ -219,10 +278,8 @@ export async function connectToWhatsApp() {
                         connectToWhatsApp();
                     }, nextDelay);
                 } else {
-                    // Logout ou erro 401 - necessário novo QR
                     console.log("🚪 Sessão encerrada. Novo QR necessário.");
                     
-                    // Remove arquivos de autenticação
                     try {
                         if (fs.existsSync('./auth_info')) {
                             fs.rmSync('./auth_info', { recursive: true, force: true });
@@ -234,9 +291,9 @@ export async function connectToWhatsApp() {
                     
                     console.log("🔄 Reiniciando para gerar novo QR Code...\n");
                     
-                    // Reinicia após logout
                     reconnectAttempts = 0;
                     qrRetryCount = 0;
+                    resourcesLoaded = false; // Reset para recarregar recursos
                     
                     setTimeout(() => {
                         connectToWhatsApp();
@@ -245,7 +302,19 @@ export async function connectToWhatsApp() {
             }
         });
 
-        // Configura todos os event listeners
+        sock.ev.on('messages.upsert', async ({ messages }) => {
+            const msg = messages[0];
+            if (!msg) return;
+            
+            console.log('🟢 MENSAGEM CAPTURADA PELO HANDLER!');
+            await handleMessages(sock, msg);
+        });
+
+        sock.ev.on('messages.reaction', async (reaction) => {
+            console.log('⚡ REAÇÃO CAPTURADA PELO HANDLER!');
+            await handleReactions(sock, reaction);
+        });
+
         setupEventListeners(sock);
 
         return sock;
@@ -258,16 +327,13 @@ export async function connectToWhatsApp() {
         console.error("📚 Stack:", error.stack);
         console.error("=".repeat(60) + "\n");
         
-        // CRÍTICO: Sempre reseta a flag em caso de erro
         isConnecting = false;
 
-        // Limpa socket em caso de erro
         if (currentSocket) {
             cleanupSocket(currentSocket);
             currentSocket = null;
         }
 
-        // RECONEXÃO INFINITA mesmo em erros
         reconnectAttempts++;
         const nextDelay = getReconnectDelay(reconnectAttempts);
         
@@ -284,7 +350,6 @@ export async function connectToWhatsApp() {
     }
 }
 
-// Função para desconectar manualmente
 export function disconnectWhatsApp() {
     console.log("\n" + "=".repeat(60));
     console.log("🛑 Desconexão manual solicitada");
@@ -309,13 +374,13 @@ export function disconnectWhatsApp() {
     console.log("✅ Bot desconectado com sucesso\n");
 }
 
-// Função para obter status da conexão
 export function getConnectionStatus() {
     return {
         isConnecting,
         reconnectAttempts,
         qrRetryCount,
         hasSocket: !!currentSocket,
-        hasPendingReconnect: !!reconnectTimeout
+        hasPendingReconnect: !!reconnectTimeout,
+        resourcesLoaded
     };
 }

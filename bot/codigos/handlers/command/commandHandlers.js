@@ -1,7 +1,5 @@
 // commandHandlers.js - HANDLERS INDIVIDUAIS DE COMANDOS
 import { handleSignos } from '../../moderation/signosHandler.js';
-import { handleContos } from '../../../codigos/moderation/contosHandler.js';
-import { handleHQs } from '../../../codigos/features/hqseroticos.js';
 import menuDamasHandler from '../../features/menuDamasHandler.js';
 import { handleBlacklistCommands } from '../../../codigos/moderation/blacklist/blacklistHandler.js';
 import { listarSignos, handleHoroscopoCommand } from '../../features/horoscopoHandler.js';
@@ -49,57 +47,6 @@ export async function handleSignosCommands(sock, message, content, from) {
         console.log(`🔮 Signos: ${lowerContent.split(' ')[0]}`);
         return true;
     }
-    return false;
-}
-
-// 📖 CONTOS
-export async function handleContosCommands(sock, message, content) {
-    const lowerContent = content.toLowerCase().trim();
-    
-    const comandos = [
-        '#contos',
-        '#ler',
-        '#aleatorio',
-        '#random',
-        '#categoria',
-        '#atualizar',
-        '#atualizarcontos',
-        '#ajudacontos'
-    ];
-
-    if (comandos.some(cmd => lowerContent.startsWith(cmd))) {
-        await handleContos(sock, message);
-        console.log(`📖 Contos: ${lowerContent.split(' ')[0]}`);
-        return true;
-    }
-    return false;
-}
-
-// 📚 HQS
-export async function handleHQsCommands(sock, message, content) {
-    const lowerContent = content.toLowerCase().trim();
-    
-    const comandos = [
-        '#hqs',
-        '#hq',
-        '#pag',
-        '#proxima',
-        '#prox',
-        '#anterior',
-        '#ant',
-        '#randomhq',
-        '#categoriahq',
-        '#atualizarhqs',
-        '#ajudahqs',
-        '#helphqs'
-    ];
-
-    if (comandos.some(cmd => lowerContent.startsWith(cmd))) {
-        console.log(`📚 HQ Command detected: ${lowerContent.split(' ')[0]}`);
-        await handleHQs(sock, message);
-        return true;
-    }
-    
     return false;
 }
 

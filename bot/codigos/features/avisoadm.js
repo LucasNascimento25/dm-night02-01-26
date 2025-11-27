@@ -4,8 +4,7 @@ const { fetchProfilePictureUrl } = pkg;
 
 // Defina seus números de WhatsApp
 const yourNumbers = [
-    '5521972337640@s.whatsapp.net',
-    '558398759516@s.whatsapp.net'
+    '5521972337640@s.whatsapp.net'
 ];
 
 // Função para enviar mensagens de aviso
@@ -31,13 +30,34 @@ const getFormattedDateTime = () => {
     return now.toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' });
 };
 
+// Função auxiliar para extrair o identificador correto do participant
+const getParticipantId = (participantData) => {
+    // Se for string (versão antiga), retorna direto
+    if (typeof participantData === 'string') {
+        return participantData;
+    }
+    // Se for objeto (versão nova), extrai phoneNumber ou id
+    if (typeof participantData === 'object' && participantData !== null) {
+        return participantData.phoneNumber || participantData.id;
+    }
+    return participantData;
+};
+
 // Função principal para lidar com atualizações de participantes
 export async function handleGroupParticipantsUpdate(sock, update, botInfo) {
     console.log('Update recebido:', update);
 
     if (!update.participants || update.participants.length === 0) return;
 
-    const participant = update.participants[0];
+    // ✅ CORREÇÃO: Adapta para funcionar com string OU objeto
+    const participantData = update.participants[0];
+    const participant = getParticipantId(participantData);
+    
+    // Para comparação de IDs (quando é objeto, usa o .id)
+    const participantIdForComparison = typeof participantData === 'object' && participantData !== null 
+        ? participantData.id 
+        : participant;
+    
     const author = update.author;
 
     let profilePic;
@@ -74,7 +94,8 @@ export async function handleGroupParticipantsUpdate(sock, update, botInfo) {
 
     } else if (update.action === 'add') {
         // Verifica se o usuário entrou por link ou foi adicionado por admin
-        const enteredByLink = !author || author === participant;
+        // Usa participantIdForComparison para comparar corretamente
+        const enteredByLink = !author || author === participantIdForComparison;
         
         if (enteredByLink) {
             message += `👋 *NOVO MEMBRO*\n\n` +
@@ -92,7 +113,8 @@ export async function handleGroupParticipantsUpdate(sock, update, botInfo) {
 
     } else if (update.action === 'remove') {
         // Verifica se o usuário saiu por conta própria ou foi removido
-        const isUserLeftByThemselves = participant === author;
+        // ✅ USA participantIdForComparison para comparar no formato correto
+        const isUserLeftByThemselves = participantIdForComparison === author;
         
         if (isUserLeftByThemselves) {
             message += `👋 *USUÁRIO SAIU DO GRUPO*\n\n` +

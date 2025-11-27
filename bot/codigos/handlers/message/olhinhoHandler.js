@@ -9,6 +9,7 @@ import fetch from 'node-fetch';
 import axios from 'axios';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import githubCache from '../../utils/githubCacheManager.js';
 
 const execPromise = promisify(exec);
 
@@ -408,26 +409,29 @@ export class OlhinhoHandler {
  */
 async function carregarAudios() {
     try {
-        console.log('🔄 Iniciando carregamento dos áudios...');
-        const response = await fetch(URL_AUDIOS_JSON);
+        console.log('🔄 [Audios] Carregando áudios...');
         
-        if (!response.ok) {
-            throw new Error(`Erro HTTP: ${response.status}`);
+        const result = await githubCache.fetch(
+            URL_AUDIOS_JSON,
+            'olhinho-audios',
+            (data) => {
+                return (data.audios || []).filter(a => a.ativo === true);
+            }
+        );
+
+        if (result.success) {
+            audios = result.data;
+            ultimaAtualizacao = new Date();
+            const origem = result.fromCache ? 'cache' : 'GitHub';
+            const count = Array.isArray(audios) ? audios.length : 'N/A';
+            console.log(`✅ [Audios] ${count} áudios carregados (${origem})`);
+            return true;
+        } else {
+            console.error('❌ [Audios] Falha ao carregar áudios');
+            return false;
         }
-        
-        const dados = await response.json();
-        audios = dados.audios || [];
-        
-        // Filtra só os ativos
-        audios = audios.filter(a => a.ativo === true);
-        
-        ultimaAtualizacao = new Date();
-        
-        console.log(`✅ ${audios.length} áudios carregados com sucesso!`);
-        console.log('🎵 Áudios disponíveis:', audios.map(a => a.nome).join(', '));
-        return true;
     } catch (error) {
-        console.error('❌ Erro ao carregar áudios:', error);
+        console.error('❌ [Audios] Erro:', error.message);
         return false;
     }
 }

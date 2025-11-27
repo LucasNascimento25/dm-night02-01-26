@@ -1,3 +1,5 @@
+//banHandler.js
+
 // Função principal para gerenciar mensagens de banimento
 export async function handleBanMessage(c, message) {
     try {
