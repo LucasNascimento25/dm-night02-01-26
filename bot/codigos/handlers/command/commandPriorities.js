@@ -5,7 +5,6 @@ import { handleGroupCommands } from "../../utils/redefinirFecharGrupo.js";
 import alertaHandler from '../../moderation/alertaHandler.js';
 import { 
     handleSignosCommands,
-    handleMenuDamas,
     handleBlacklistGroup,
     handleVarreduraCommand,
     handleHoroscopoLegacy
@@ -43,7 +42,6 @@ export async function processCommandPriorities(
 
     // 🌟 PRIORIDADES 6-12: OUTROS COMANDOS
     if (!handled) handled = await handleSignosCommands(sock, message, content, from);
-    if (!handled) handled = await handleMenuDamas(sock, message, content, from);
     if (!handled) handled = await handleBlacklistGroup(sock, from, userId, content, message);
     if (!handled) handled = await handleVarreduraCommand(sock, message, content, from, userId);
     if (!handled) handled = await handleHoroscopoLegacy(sock, message, content, from);

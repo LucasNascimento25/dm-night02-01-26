@@ -1,3 +1,5 @@
+//confissoesScheduler.js
+
 import cron from 'node-cron';
 import confissoesHandler from '../handlers/message/confissoesHandler.js';
 

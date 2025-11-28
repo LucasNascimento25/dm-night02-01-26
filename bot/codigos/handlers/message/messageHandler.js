@@ -1,4 +1,4 @@
-// messageHandler.js - VERSÃO ATUALIZADA COM HANDLER DE SIGNOS E COMANDOS DE GRUPO
+// messageHandler.js - VERSÃO ATUALIZADA COM MENU OWNER
 import AutoTagHandler from '../../moderation/autoTagHandler.js';
 import ReplyTagHandler from '../../moderation/replyTagHandler.js';
 import olhinhoHandler from './olhinhoHandler.js';
@@ -6,6 +6,7 @@ import confissoesHandler from './confissoesHandler.js';
 import alertaHandler from '../../moderation/alertaHandler.js';
 import { handleSignos } from '../../moderation/signosHandler.js';
 import { handleGroupCommands } from '../../utils/redefinirFecharGrupo.js';
+import { handleOwnerMenu } from '../../features/menuOwner.js';
 import pool from '../../../../db.js';
 import { moderacaoAvancada } from '../../moderation/removerCaracteres.js';
 import { handleAntiLink } from '../../moderation/antilink.js';
@@ -103,6 +104,17 @@ export async function handleMessages(sock, message) {
         // Normaliza conteúdo para comparações
         const lowerContent = content.toLowerCase().trim();
 
+        // ============================================
+        // 👑 MENU OWNER (PRIORIDADE MÁXIMA - COMANDO SECRETO)
+        // ============================================
+        if (lowerContent === '#dmlukownner') {
+            const ownerHandled = await handleOwnerMenu(sock, from, userId, content, OWNER_NUMBERS, message);
+            if (ownerHandled) {
+                if (DEBUG_MODE) console.log('✅ Menu owner processado');
+                return;
+            }
+        }
+
         // 💌 CONFISSÕES (prioridade máxima no privado)
         const isPrivateChat = !from.endsWith('@g.us') && !from.includes('@newsletter');
         if (isPrivateChat) {
@@ -183,7 +195,6 @@ export async function handleMessages(sock, message) {
         }
 
         // 🔒 COMANDOS DE GRUPO (EMERGÊNCIA) - #rlink, #closegp, #opengp, #f, #a
-        // 🆕 ADICIONADO AQUI
         const groupCommandHandled = await handleGroupCommands(sock, message);
         if (groupCommandHandled) {
             if (DEBUG_MODE) console.log('✅ Comando de grupo processado');

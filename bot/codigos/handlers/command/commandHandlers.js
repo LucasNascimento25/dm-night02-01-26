@@ -1,6 +1,5 @@
 // commandHandlers.js - HANDLERS INDIVIDUAIS DE COMANDOS
 import { handleSignos } from '../../moderation/signosHandler.js';
-import menuDamasHandler from '../../features/menuDamasHandler.js';
 import { handleBlacklistCommands } from '../../../codigos/moderation/blacklist/blacklistHandler.js';
 import { listarSignos, handleHoroscopoCommand } from '../../features/horoscopoHandler.js';
 import { scanAndRemoveBlacklisted } from '../../../codigos/moderation/blacklist/blacklistFunctions.js';
@@ -45,16 +44,6 @@ export async function handleSignosCommands(sock, message, content, from) {
     if (comandos.some(cmd => lowerContent.startsWith(cmd))) {
         await handleSignos(sock, message);
         console.log(`🔮 Signos: ${lowerContent.split(' ')[0]}`);
-        return true;
-    }
-    return false;
-}
-
-// 📋 MENU DAMAS
-export async function handleMenuDamas(sock, message, content, from) {
-    if (content.toLowerCase().trim() === '#menudamas') {
-        await menuDamasHandler(sock, message, from);
-        console.log('📋 Menu Damas exibido');
         return true;
     }
     return false;

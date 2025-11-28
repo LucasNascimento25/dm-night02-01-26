@@ -22,7 +22,7 @@ export function getOwnerMenu() {
 ╔═══════════════════════════
 ║ 🚫 *BLACKLIST*
 ╠═══════════════════════════
-║ #addlista [número] [motivo]
+║ #addlista [número]
 ║ → Adiciona número à blacklist
 ║
 ║ #remlista [número]
@@ -35,10 +35,12 @@ export function getOwnerMenu() {
 ║ → Lista todos os números bloqueados
 ║
 ║ #varredura
-║ → Remove da blacklist do grupo
+║ → Varredura manual no grupo
 ║
 ║ #infolista
 ║ → Guia completo da blacklist
+║
+║ 🔄 Varredura automática ao entrar
 ╚═══════════════════════════
 
 ╔═══════════════════════════
@@ -50,21 +52,35 @@ export function getOwnerMenu() {
 ╚═══════════════════════════
 
 ╔═══════════════════════════
+║ 📢 *ALERTAS E REGRAS*
+╠═══════════════════════════
+║ #alerta
+║ → Sem responder: regras gerais
+║ → Respondendo: advertência individual
+║
+║ #atualizarregras
+║ → Limpa cache das regras
+║
+║ #aviso adm
+║ → Envia aviso administrativo
+╚═══════════════════════════
+
+╔═══════════════════════════
 ║ 🏷️ *MARCAR TODOS* (Admins)
 ╠═══════════════════════════
-║ 📝 *TEXTO:*
-║ → [mensagem] #all damas
+║ 📝 *#all damas* - TEXTO:
 ║ → Ex: "Festa 20h #all damas"
 ║
-║ 🖼️ *IMAGEM:*
-║ → Envie foto com legenda:
-║ → "#all damas" ou
-║ → "Legenda #all damas"
+║ 🖼️ *#all damas* - IMAGEM:
+║ → Envie foto com legenda
 ║
-║ 🎥 *VÍDEO:*
-║ → Envie vídeo com legenda:
-║ → "#all damas" ou
-║ → "Legenda #all damas"
+║ 🎥 *#all damas* - VÍDEO:
+║ → Envie vídeo com legenda
+║
+║ 🔄 *#totag* - REPOSTAR:
+║ → Modo 1: Envie mensagem com #totag
+║ → Modo 2: Responda mensagem com #totag
+║ → Reposta marcando todos
 ╚═══════════════════════════
 
 ╔═══════════════════════════
@@ -72,75 +88,135 @@ export function getOwnerMenu() {
 ╠═══════════════════════════
 ║ #ban @usuário
 ║ → Remove usuário do grupo
-║ → ⚡ Comando deletado automaticamente
 ║
 ║ *Formas de usar:*
-║ • Responder imagem com #ban
-║ • Responder mensagem com #ban
 ║ • #ban @nome
 ║ • @nome #ban
+║ • Responder mensagem com #ban
+║ • Responder imagem com #ban
 ║
 ║ *Proteções:*
-║ ✅ Não remove administradores
-║ ✅ Não remove o próprio bot
-║ 🗑️ Apaga comando após execução
+║ ✅ Não remove admins
+║ ✅ Não remove o bot
+║ 🗑️ Comando deletado automaticamente
 ╚═══════════════════════════
 
 ╔═══════════════════════════
-║ 🔧 *GERENCIAMENTO*
+║ 🔧 *GERENCIAMENTO DE GRUPO*
 ╠═══════════════════════════
-║ #rlink
-║ → Redefine link do grupo
-║ → ⚡ Comando deletado automaticamente
+║ 🔒 *FECHAR GRUPO:*
+║ → #f (emergência - rápido)
+║ → #closegp (comando completo)
 ║
-║ #closegp
-║ → Fecha grupo (só admins falam)
-║ → ⚡ Comando deletado automaticamente
+║ 🔓 *ABRIR GRUPO:*
+║ → #a (rápido)
+║ → #opengp (comando completo)
 ║
-║ #opengp
-║ → Abre grupo (todos podem falar)
-║ → ⚡ Comando deletado automaticamente
+║ 🔗 *REDEFINIR LINK:*
+║ → #rlink
 ║
-║ *Proteções:*
-║ ✅ Apenas administradores
-║ ✅ Bot precisa ser admin
-║ 🗑️ Apaga comandos após execução
+║ ⚡ Todos os comandos são deletados
+╚═══════════════════════════
+
+╔═══════════════════════════
+║ 🎭 *CONFISSÕES ANÔNIMAS*
+╠═══════════════════════════
+║ *Usuários (Privado):*
+║ #confissoes [texto]
+║ → Envia confissão anônima
+║
+║ *Admins (Grupo):*
+║ #postarconfissoes
+║ → Posta confissões pendentes
+║
+║ #avisarconfissoes
+║ → Avisa sobre a brincadeira
+╚═══════════════════════════
+
+╔═══════════════════════════
+║ 🔮 *SIGNOS E HORÓSCOPO*
+╠═══════════════════════════
+║ *Público:*
+║ !signo [nome]
+║ → Descobre signo pelo nome
+║
+║ #horoscopo [signo]
+║ → Ex: #horoscopo leão
+║ → Adicione: hoje, amanhã, ontem
+║
+║ *Admins:*
+║ #damastaro
+║ → Gerenciar signos
+║
+║ #atualizarsignos
+║ → Atualizar cache
+╚═══════════════════════════
+
+╔═══════════════════════════
+║ 🎵 *RECURSOS EXTRAS*
+╠═══════════════════════════
+║ 🎨 *#stickerdamas*
+║ → Criar stickers personalizados
+║ → Envie imagem/vídeo com o comando
+║
+║ 🎶 *Music* - Download de músicas
+║ 👁️ *Olhinho* - Detector de vizualização
+║ 🧹 *RemoverCaracteres* - Limpa texto
+║ 🛡️ *AntiLink* - Proteção automática
+║ 👋 *Boas-vindas/Despedida* - Automático
 ╚═══════════════════════════
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 ⚡ *OBSERVAÇÕES IMPORTANTES*
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🔐 Comandos administrativos:
-   • Você ser administrador
-   • Bot ser administrador
+🔐 *Permissões:*
+   • Comandos admin: você e bot precisam ser admins
+   • Comandos públicos: liberado para todos
 
-🏷️ Sistema AutoTag:
-   • Apenas admins usam #all damas
+🏷️ *Sistema de Marcação:*
+   • #all damas - Apenas admins
+   • #totag - Reposta com marcação
    • Suporta texto, imagem e vídeo
-   • Remove mensagem original
-   • Reenvia com marcações
 
-🔨 Sistema de Banimento:
-   • Apenas admins podem banir
-   • Admins não podem ser banidos
-   • Comandos deletados automaticamente
-   • Sistema com múltiplas tentativas
+🚫 *Sistema de Blacklist:*
+   • Adicione números com código do país
+   • Brasileiros: 55 + DDD + número
+   • Estrangeiros: código + número
+   • Varredura automática ao entrar
 
-🔧 Sistema de Gerenciamento:
+⚠️ *Sistema de Advertências:*
+   • 3 advertências = remoção automática
+   • Use #adv respondendo mensagem
+   • Registro permanente no sistema
+
+🔨 *Sistema de Banimento:*
    • Apenas admins podem usar
-   • Bot precisa ser admin
-   • Comandos deletados automaticamente
-   • Sistema com múltiplas tentativas
+   • Admins não podem ser banidos
+   • Bot não pode ser banido
+   • Comandos apagados automaticamente
 
-🛡️ Proteções ativas:
-   • AntiLink automático
-   • Blacklist automática
-   • Sistema de advertências
+🔧 *Gerenciamento de Grupo:*
+   • #f / #a - Comandos rápidos
+   • #closegp / #opengp - Comandos completos
+   • #rlink - Atualiza link do grupo
+   • Todos os comandos são deletados
+
+🎭 *Sistema de Confissões:*
+   • Usuários enviam no privado do bot
+   • Admins postam no grupo
+   • 100% anônimo e seguro
+
+🛡️ *Proteções Automáticas:*
+   • AntiLink ativo
+   • Blacklist com varredura
+   • Boas-vindas e despedidas
    • Anti-banimento de admins
+   • Detector de vizualização
 
-💡 Para ajuda específica:
-   • #infolista → Blacklist
+💡 *Ajuda:*
+   • #infolista → Guia da blacklist
+   • #avisarconfissoes → Regras de confissões
    • #dmlukownner → Este menu
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━
