@@ -195,28 +195,34 @@ ${regras}`,
 
       console.log(`✅ Regras enviadas para @${userId.split('@')[0]}`);
 
-      // TERCEIRA PARTE: Enviar 6 áudios imediatamente
+      // TERCEIRA PARTE: Enviar TODOS os 4 áudios imediatamente
       try {
         console.log('🎵 Carregando áudios do sistema de alertas...');
         const audios = await carregarAudios();
         
-        if (audios && audios.length >= 6) {
-          console.log(`🎵 Enviando 6 áudios para @${userId.split('@')[0]}`);
+        console.log(`📊 Áudios carregados: ${audios?.length || 0}`);
+        
+        if (audios && audios.length > 0) {
+          console.log(`🎵 Enviando ${audios.length} áudios para @${userId.split('@')[0]}`);
+          
+          // ⚡ ENVIAR TODOS OS ÁUDIOS DISPONÍVEIS
           await sendAudiosSequencialComResposta(
             sock, 
             groupId, 
             audios, 
-            3,  // Começa do índice 3 (4º áudio)
-            6,  // Envia 6 áudios
+            0,  // Começa do primeiro áudio (índice 0)
+            audios.length,  // Envia TODOS os áudios disponíveis
             regrasMessage,  // Responde a mensagem das regras
             userId  // Menciona o usuário infrator
           );
+          
           console.log('✅ Áudios enviados com sucesso');
         } else {
-          console.warn('⚠️ Não há áudios suficientes disponíveis');
+          console.warn('⚠️ Nenhum áudio disponível para envio');
         }
       } catch (error) {
         console.error('❌ Erro ao enviar áudios:', error);
+        console.error(error.stack);
       }
 
     } catch (error) {

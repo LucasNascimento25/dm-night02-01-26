@@ -143,7 +143,7 @@ class ReplyTagHandler {
             // 🔐 VERIFICA SE O USUÁRIO É ADMIN
             const isAdmin = await this.isUserAdmin(sock, groupId, userId);
             if (!isAdmin) {
-                const styledTitle = "👏🍻 *DﾑMﾑS* 💃🔥 *Dﾑ* *NIGӇԵ*💃🎶🍾🍸";
+                const styledTitle = "👏🍻 DﾑMﾑS 💃🔥 Dﾑ NIGӇԵ💃🎶🍾🍸";
                 await sock.sendMessage(from, { 
                     text: `${styledTitle}\n\n🚫 *ACESSO NEGADO*\n\n❌ Apenas administradores podem usar o comando \`#totag\`!\n\n👨‍💼 Solicite a um admin para repostar a mensagem.` 
                 });
@@ -191,7 +191,7 @@ class ReplyTagHandler {
             }
 
             const mentions = this.generateMentions(groupData.participants, userId);
-            const styledTitle = "👏🍻 *DﾑMﾑS* 💃🔥 *Dﾑ* *NIGӇԵ*💃🎶🍾🍸";
+            const styledTitle = "👏🍻 DﾑMﾑS 💃🔥 Dﾑ NIGӇԵ💃🎶🍾🍸";
 
             // 🖼️ PROCESSA IMAGEM DIRETA (sem resposta, apenas #totag na legenda)
             if (currentImageMessage && hasCurrentImageCommand) {
@@ -516,7 +516,7 @@ class ReplyTagHandler {
 - Digite: \`#totag\`
 
 💃 *Resultado:*
-👏🍻 *DﾑMﾑS* 💃🔥 *Dﾑ* *NIGӇԵ*💃🎶🍾🍸
+👏🍻 DﾑMﾑS 💃🔥 Dﾑ NIGӇԵ💃🎶🍾🍸
 
 [Conteúdo repostado]
 

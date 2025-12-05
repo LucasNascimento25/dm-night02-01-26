@@ -1,5 +1,6 @@
 // alertaHandler.js - Sistema de Moderação Completo
 // Versão otimizada com envio imediato de áudios
+// AJUSTADO PARA 4 ÁUDIOS
 
 import axios from 'axios';
 import fs from 'fs';
@@ -24,7 +25,10 @@ const CONFIG = {
     AUDIO_INTERVAL: 0, // ⚡ SEM INTERVALO - ENVIO IMEDIATO
     MAX_RETRIES: 3,
     DOWNLOAD_TIMEOUT: 30000,
-    DEBUG: process.env.DEBUG === 'true'
+    DEBUG: process.env.DEBUG === 'true',
+    // 🎵 Configuração de áudios
+    AUDIOS_GRUPO: 4,      // TODOS os 4 áudios para grupo geral
+    AUDIOS_INDIVIDUAL: 4  // TODOS os 4 áudios para advertência individual
 };
 
 // ============================================
@@ -518,6 +522,16 @@ const alertaHandler = async (sock, message) => {
             return true;
         }
 
+        // ⚠️ VALIDAÇÃO: Verificar se temos áudios suficientes
+        if (audios.length < 4) {
+            await sock.sendMessage(from, {
+                text: `⚠️ *Áudios insuficientes!*\n\n` +
+                      `Temos apenas ${audios.length} áudio(s).\n` +
+                      `Mínimo necessário: 4 áudios`
+            }, { quoted: message });
+            return true;
+        }
+
         const groupMetadata = await sock.groupMetadata(from);
 
         const isAdmin = groupMetadata.participants.some(
@@ -571,8 +585,8 @@ const alertaHandler = async (sock, message) => {
 
             console.log(`✅ Regras enviadas (${mentions.length} menções)`);
 
-            // ⚡ ENVIO IMEDIATO DOS ÁUDIOS
-            await sendAudiosSequencial(sock, from, audios, 0, 3);
+            // 🎵 Enviar TODOS os 4 áudios para grupo geral
+            await sendAudiosSequencial(sock, from, audios, 0, audios.length);
 
             return true;
         }
@@ -627,8 +641,8 @@ const alertaHandler = async (sock, message) => {
 
         console.log(`✅ Regras enviadas para @${targetName}`);
 
-        // ⚡ ENVIO IMEDIATO DOS ÁUDIOS (sem setTimeout)
-        await sendAudiosSequencialComResposta(sock, from, audios, 3, 6, regrasMessage, targetParticipant);
+        // 🎵 Enviar TODOS os 4 áudios para advertência individual
+        await sendAudiosSequencialComResposta(sock, from, audios, 0, audios.length, regrasMessage, targetParticipant);
 
         return true;
 
@@ -646,6 +660,7 @@ console.log('🚀 Iniciando carregamento dos áudios...');
 carregarAudios().then(audios => {
     if (audios && audios.length > 0) {
         console.log('✅ alertaHandler pronto para uso!');
+        console.log(`📊 Configuração: TODOS os ${audios.length} áudios serão enviados em ambos os casos`);
     } else {
         console.warn('⚠️ alertaHandler iniciado, mas nenhum áudio foi carregado');
     }
