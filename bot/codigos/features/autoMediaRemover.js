@@ -1,6 +1,6 @@
 // autoMediaRemover.js - Remove FOTOS e VÍDEOS automaticamente
 // 🔄 Sistema otimizado - REMOVE DE TODOS (participantes E admins)
-// ✅ VERSÃO CORRIGIDA - Reconhece legendas com formatação
+// ✅ VERSÃO CORRIGIDA - Funciona no WhatsApp Web
 
 import { downloadMediaMessage } from '@whiskeysockets/baileys';
 import fs from 'fs';
@@ -21,9 +21,9 @@ export default class AutoMediaRemover {
       notifyOwner: false,
       exemptAdmins: false,
       whitelistGroups: [],
-      deleteDelay: 1000,
-      allowedCaption: '👏🍻 DﾑMﾑS 💃🔥 Dﾑ NIGӇԵ💃🎶🍾🍸', // Legenda permitida
-      debugMode: false // Ative para ver logs detalhados
+      deleteDelay: 500, // Reduzido para ser mais rápido
+      allowedCaption: '👏🍻 DﾑMﾑS 💃🔥 Dﾑ NIGӇԵ💃🎶🍾🍸',
+      debugMode: false
     };
     
     this.stats = {
@@ -41,7 +41,9 @@ export default class AutoMediaRemover {
       const { key, message, messageTimestamp } = msg;
       
       if (!key || !message) {
-        console.log('⚠️ Mensagem inválida - sem key ou message');
+        if (this.config.debugMode) {
+          console.log('⚠️ Mensagem inválida - sem key ou message');
+        }
         return;
       }
 
@@ -70,11 +72,13 @@ export default class AutoMediaRemover {
         return;
       }
 
-      // 🔍 DEBUG MODE - Mostra estrutura completa (apenas se ativado)
+      // 🔍 DEBUG MODE - Mostra estrutura completa
       if (this.config.debugMode) {
         console.log('\n🔍 ==================== DEBUG MODE ====================');
         console.log('📱 Tipo de mensagem:', messageType);
         console.log('👤 Remetente:', senderId.split('@')[0]);
+        console.log('🆔 Chat ID:', chatId);
+        console.log('🔑 Message Key:', JSON.stringify(key, null, 2));
         console.log('📋 ESTRUTURA COMPLETA DA MENSAGEM:');
         console.log(JSON.stringify(message, null, 2));
         console.log('🔍 ==================================================\n');
@@ -118,6 +122,12 @@ export default class AutoMediaRemover {
       if (viewOnceMsg?.videoMessage) return 'videoMessage';
     }
 
+    if (message.viewOnceMessageV2Extension) {
+      const viewOnceMsg = message.viewOnceMessageV2Extension.message;
+      if (viewOnceMsg?.imageMessage) return 'imageMessage';
+      if (viewOnceMsg?.videoMessage) return 'videoMessage';
+    }
+
     return null;
   }
 
@@ -151,8 +161,19 @@ export default class AutoMediaRemover {
         }
       }
 
+      if (message.viewOnceMessageV2Extension) {
+        const viewOnceMsg = message.viewOnceMessageV2Extension.message;
+        if (viewOnceMsg?.imageMessage?.caption) {
+          caption = viewOnceMsg.imageMessage.caption;
+        } else if (viewOnceMsg?.videoMessage?.caption) {
+          caption = viewOnceMsg.videoMessage.caption;
+        }
+      }
+
       if (!caption) {
-        console.log('⚠️ Mídia SEM legenda - será removida');
+        if (this.config.debugMode) {
+          console.log('⚠️ Mídia SEM legenda - será removida');
+        }
         return false;
       }
 
@@ -162,7 +183,8 @@ export default class AutoMediaRemover {
           .replace(/\*([^*]+)\*/g, '$1')  // Remove *negrito*
           .replace(/_([^_]+)_/g, '$1')    // Remove _itálico_
           .replace(/~([^~]+)~/g, '$1')    // Remove ~riscado~
-          .replace(/```([^`]+)```/g, '$1'); // Remove ```código```
+          .replace(/```([^`]+)```/g, '$1') // Remove ```código```
+          .replace(/`([^`]+)`/g, '$1');   // Remove `monospace`
       };
 
       // 🔍 Pega apenas a PRIMEIRA LINHA da legenda (até o primeiro \n)
@@ -187,11 +209,15 @@ export default class AutoMediaRemover {
 
       if (isMatch) {
         console.log(`✅ LEGENDA PERMITIDA ENCONTRADA - Mídia NÃO será removida`);
-        console.log(`   Primeira linha: "${firstLineClean}"`);
+        if (this.config.debugMode) {
+          console.log(`   Primeira linha: "${firstLineClean}"`);
+        }
       } else {
         console.log(`❌ Legenda DIFERENTE - Mídia será removida`);
-        console.log(`   Recebido: "${firstLineClean}"`);
-        console.log(`   Esperado: "${allowedClean}"`);
+        if (this.config.debugMode) {
+          console.log(`   Recebido: "${firstLineClean}"`);
+          console.log(`   Esperado: "${allowedClean}"`);
+        }
       }
 
       return isMatch;
@@ -203,10 +229,10 @@ export default class AutoMediaRemover {
 
   async handleMedia(chatId, senderId, messageKey, messageType) {
     try {
-      // Aguarda para garantir que a mensagem foi processada
+      // Aguarda um pouco antes de deletar
       await new Promise(resolve => setTimeout(resolve, this.config.deleteDelay));
 
-      // 🗑️ Tenta deletar a mensagem
+      // 🗑️ Tenta deletar a mensagem com múltiplas estratégias
       let deleted = false;
       let attempts = 0;
       const maxAttempts = 3;
@@ -214,11 +240,20 @@ export default class AutoMediaRemover {
       while (!deleted && attempts < maxAttempts) {
         try {
           attempts++;
-          console.log(`🔄 Tentativa ${attempts} de deletar mídia...`);
           
-          // Formato correto para deletar mensagem de outros usuários
+          if (this.config.debugMode) {
+            console.log(`🔄 Tentativa ${attempts} de deletar mídia...`);
+            console.log('🔑 Usando messageKey:', JSON.stringify(messageKey, null, 2));
+          }
+          
+          // 🔥 MÉTODO CORRETO para deletar mensagens de OUTROS no grupo
           await this.sock.sendMessage(chatId, { 
-            delete: messageKey
+            delete: {
+              remoteJid: chatId,
+              fromMe: false,
+              id: messageKey.id,
+              participant: messageKey.participant || senderId
+            }
           });
           
           deleted = true;
@@ -229,11 +264,14 @@ export default class AutoMediaRemover {
           
           if (attempts < maxAttempts) {
             // Aguarda progressivamente mais tempo entre tentativas
-            await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+            await new Promise(resolve => setTimeout(resolve, 500 * attempts));
           } else {
             this.stats.errors++;
             console.error('❌ Falha ao deletar após 3 tentativas');
-            console.error('📋 MessageKey:', JSON.stringify(messageKey, null, 2));
+            if (this.config.debugMode) {
+              console.error('📋 MessageKey completo:', JSON.stringify(messageKey, null, 2));
+              console.error('📋 Erro completo:', error);
+            }
           }
         }
       }
@@ -369,7 +407,6 @@ export default class AutoMediaRemover {
   }
 
   getAllowedCaption() {
-    console.log(`📋 Legenda permitida atual: "${this.config.allowedCaption}"`);
     return this.config.allowedCaption;
   }
 

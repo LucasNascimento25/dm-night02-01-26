@@ -1,4 +1,4 @@
-// messageHandler.js - VERSÃO SEM COMANDOS DE MÍDIA
+// messageHandler.js - VERSÃO CORRIGIDA COM AUTO MEDIA REMOVER
 import AutoTagHandler from '../../moderation/autoTagHandler.js';
 import ReplyTagHandler from '../../moderation/replyTagHandler.js';
 import olhinhoHandler from './olhinhoHandler.js';
@@ -15,7 +15,7 @@ import { handleBasicCommands, handleGroupUpdate } from './messageHelpers.js';
 import { handleStickerCommand } from '../../features/stickerHandler.js';
 import { processarComandoRegras } from '../../features/boasVindas.js';
 import { configurarDespedida } from '../../features/despedidaMembro.js';
-import AutoMediaRemover from '../../features/autoMediaRemover.js'; // 🔥 Importação direta
+import AutoMediaRemover from '../../features/autoMediaRemover.js';
 
 const autoTag = new AutoTagHandler();
 const replyTag = new ReplyTagHandler();
@@ -23,7 +23,7 @@ const replyTag = new ReplyTagHandler();
 const OWNER_NUMBERS = ['5516981874405', '5521972337640'];
 const DEBUG_MODE = process.env.DEBUG === 'true';
 
-// 🔥 REMOÇÃO AUTOMÁTICA (SEM COMANDOS)
+// 🔥 REMOÇÃO AUTOMÁTICA DE MÍDIAS
 const OWNER_JID = '5516981874405@s.whatsapp.net'; // ⚠️ COLOQUE SEU NÚMERO AQUI
 let autoMediaRemover = null;
 
@@ -66,13 +66,17 @@ export async function handleMessages(sock, message) {
 
         // Verifica duplicatas
         const uniqueId = getMessageUniqueId(message.key);
-        if (processedMessages.has(uniqueId)) return;
+        if (processedMessages.has(uniqueId)) {
+            return;
+        }
         
         processedMessages.add(uniqueId);
         cleanMessageCache();
         
         // Validações básicas
-        if (!message?.key || !message?.message) return;
+        if (!message?.key || !message?.message) {
+            return;
+        }
 
         const from = message.key.remoteJid;
         const userId = message.key.participant || message.key.remoteJid;
@@ -83,16 +87,26 @@ export async function handleMessages(sock, message) {
             message.message.videoMessage?.caption || '';
 
         // ============================================
+        // 🔥 REMOÇÃO AUTOMÁTICA DE MÍDIAS (PRIORIDADE MÁXIMA)
+        // ============================================
+        // Processa ANTES de verificar se é mensagem do bot
+        await autoMediaRemover.processMessage(message);
+
+        // ============================================
         // 🛡️ CONTROLE DE MENSAGENS DO BOT
         // ============================================
         if (message.key.fromMe) {
             const lowerContent = content.toLowerCase().trim();
             const trimmedContent = content.trim();
             
+            // Permite comandos e mensagens específicas do bot
             if (lowerContent.includes('#all damas')) {
                 if (DEBUG_MODE) console.log('✅ Bot usando #all damas - permitido');
             }
-            else if (trimmedContent.startsWith('#') || trimmedContent.startsWith('!') || trimmedContent.startsWith('@')) {
+            else if (trimmedContent.startsWith('#') || 
+                     trimmedContent.startsWith('!') || 
+                     trimmedContent.startsWith('@') ||
+                     trimmedContent.startsWith('/')) {
                 if (DEBUG_MODE) console.log('✅ Comando do bot - permitido');
             }
             else {
@@ -101,12 +115,10 @@ export async function handleMessages(sock, message) {
             }
         }
 
-        // 🔥 REMOÇÃO AUTOMÁTICA DE MÍDIAS (PRIORIDADE MÁXIMA)
-        // Processa ANTES de qualquer outro comando
-        await autoMediaRemover.processMessage(message);
-
-        // Ignora mensagens vazias
-        if (!content?.trim()) return;
+        // Ignora mensagens vazias (após remoção de mídia)
+        if (!content?.trim()) {
+            return;
+        }
 
         // Log apenas se DEBUG_MODE ativo
         if (DEBUG_MODE) {
@@ -126,24 +138,36 @@ export async function handleMessages(sock, message) {
             }
         }
 
+        // ============================================
         // 💌 CONFISSÕES (privado)
+        // ============================================
         const isPrivateChat = !from.endsWith('@g.us') && !from.includes('@newsletter');
         if (isPrivateChat) {
             const handled = await confissoesHandler.handlePrivateMessage(sock, message, from, userId, content);
-            if (handled) return;
+            if (handled) {
+                return;
+            }
         }
 
-        // 🎵 Comando #atualizaraudios
+        // ============================================
+        // 🎵 COMANDO #atualizaraudios
+        // ============================================
         if (olhinhoHandler.isComandoAtualizar && olhinhoHandler.isComandoAtualizar(message)) {
             await olhinhoHandler.handleComandoAtualizar(sock, message);
             return;
         }
 
-        // 👁️ Reações de olhinho
+        // ============================================
+        // 👁️ REAÇÕES DE OLHINHO
+        // ============================================
         const isReaction = await olhinhoHandler.handleReactionFromMessage(sock, message);
-        if (isReaction) return;
+        if (isReaction) {
+            return;
+        }
 
-        // 🛡️ Moderação em grupos
+        // ============================================
+        // 🛡️ MODERAÇÃO EM GRUPOS
+        // ============================================
         if (from.endsWith('@g.us')) {
             await Promise.all([
                 moderacaoAvancada(sock, message),
@@ -151,22 +175,34 @@ export async function handleMessages(sock, message) {
             ]);
         }
 
-        // 🔥 ReplyTag
+        // ============================================
+        // 🔥 REPLYTAG
+        // ============================================
         if (message.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
             const replyResult = await replyTag.processReply(sock, from, userId, content, messageKey, message);
-            if (replyResult?.processed) return;
+            if (replyResult?.processed) {
+                return;
+            }
         }
 
         const replyAdminHandled = await replyTag.handleAdminCommands(sock, from, userId, content);
-        if (replyAdminHandled) return;
-
-        // 📋 Comando #regras
-        if (lowerContent.startsWith('#regras')) {
-            const regrasProcessed = await processarComandoRegras(sock, message);
-            if (regrasProcessed) return;
+        if (replyAdminHandled) {
+            return;
         }
 
-        // 🚨 MODERAÇÃO
+        // ============================================
+        // 📋 COMANDO #regras
+        // ============================================
+        if (lowerContent.startsWith('#regras')) {
+            const regrasProcessed = await processarComandoRegras(sock, message);
+            if (regrasProcessed) {
+                return;
+            }
+        }
+
+        // ============================================
+        // 🚨 MODERAÇÃO - ALERTA E REGRAS
+        // ============================================
         if (lowerContent === '#atualizarregras' || lowerContent.includes('#alerta')) {
             if (DEBUG_MODE) console.log(`🔍 Comando detectado: ${lowerContent}`);
             
@@ -177,46 +213,62 @@ export async function handleMessages(sock, message) {
             }
         }
 
-        // 🎨 Comando #stickerdamas
+        // ============================================
+        // 🎨 COMANDO #stickerdamas
+        // ============================================
         if (lowerContent.startsWith('#stickerdamas')) {
             await handleStickerCommand(sock, message);
             return;
         }
 
-        // 💌 Comandos de confissões (admin)
+        // ============================================
+        // 💌 COMANDOS DE CONFISSÕES (admin)
+        // ============================================
         if (from.endsWith('@g.us')) {
             if (lowerContent === '#avisarconfissoes') {
                 const avisoPosted = await confissoesHandler.postarAvisoConfissoes(sock, from, userId, messageKey);
-                if (avisoPosted) return;
+                if (avisoPosted) {
+                    return;
+                }
             }
             
             if (lowerContent === '#postarconfissoes') {
                 const confissaoPosted = await confissoesHandler.handleManualPost(sock, from, userId, messageKey);
-                if (confissaoPosted) return;
+                if (confissaoPosted) {
+                    return;
+                }
             }
         }
 
+        // ============================================
         // 🔮 SIGNOS
+        // ============================================
         const signosHandled = await handleSignos(sock, message);
         if (signosHandled) {
             if (DEBUG_MODE) console.log('✅ Comando de signos processado');
             return;
         }
 
+        // ============================================
         // 🔒 COMANDOS DE GRUPO
+        // ============================================
         const groupCommandHandled = await handleGroupCommands(sock, message);
         if (groupCommandHandled) {
             if (DEBUG_MODE) console.log('✅ Comando de grupo processado');
             return;
         }
 
-        // Comandos por prioridade
+        // ============================================
+        // 📋 COMANDOS POR PRIORIDADE
+        // ============================================
         const handled = await processCommandPriorities(
             sock, message, from, userId, content,
             OWNER_NUMBERS, autoTag, pool
         );
 
-        // Comandos básicos
+        // ============================================
+        // 📝 COMANDOS BÁSICOS
+        // ============================================
         if (!handled) {
             await handleBasicCommands(sock, message, from, userId, content, pool);
         }
@@ -284,7 +336,7 @@ export async function handleGroupParticipantsUpdate(sock, update) {
 }
 
 // ============================================
-// 📊 UTILITÁRIOS
+// 📊 UTILITÁRIOS E EXPORTAÇÕES
 // ============================================
 export function getCacheStats() {
     return {
@@ -298,4 +350,11 @@ export function clearMessageCache() {
     const size = processedMessages.size;
     processedMessages.clear();
     if (DEBUG_MODE) console.log(`🧹 Cache limpo: ${size} mensagens`);
+}
+
+// ============================================
+// 🎮 ACESSO AO AUTO MEDIA REMOVER (para comandos)
+// ============================================
+export function getAutoMediaRemover() {
+    return autoMediaRemover;
 }
