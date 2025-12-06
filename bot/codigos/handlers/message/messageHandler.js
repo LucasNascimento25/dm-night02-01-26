@@ -1,4 +1,4 @@
-// messageHandler.js - VERSÃO CORRIGIDA COM AUTO MEDIA REMOVER
+// messageHandler.js - VERSÃO ATUALIZADA COM MENU OWNER
 import AutoTagHandler from '../../moderation/autoTagHandler.js';
 import ReplyTagHandler from '../../moderation/replyTagHandler.js';
 import olhinhoHandler from './olhinhoHandler.js';
@@ -15,17 +15,12 @@ import { handleBasicCommands, handleGroupUpdate } from './messageHelpers.js';
 import { handleStickerCommand } from '../../features/stickerHandler.js';
 import { processarComandoRegras } from '../../features/boasVindas.js';
 import { configurarDespedida } from '../../features/despedidaMembro.js';
-import AutoMediaRemover from '../../features/autoMediaRemover.js';
 
 const autoTag = new AutoTagHandler();
 const replyTag = new ReplyTagHandler();
 
 const OWNER_NUMBERS = ['5516981874405', '5521972337640'];
 const DEBUG_MODE = process.env.DEBUG === 'true';
-
-// 🔥 REMOÇÃO AUTOMÁTICA DE MÍDIAS
-const OWNER_JID = '5516981874405@s.whatsapp.net'; // ⚠️ COLOQUE SEU NÚMERO AQUI
-let autoMediaRemover = null;
 
 // ============================================
 // 🔥 CACHE PARA EVITAR DUPLICATAS
@@ -58,25 +53,15 @@ function extrairNumeroJID(jid) {
 // ============================================
 export async function handleMessages(sock, message) {
     try {
-        // 🔥 Inicializar AutoMediaRemover (apenas uma vez)
-        if (!autoMediaRemover) {
-            autoMediaRemover = new AutoMediaRemover(sock, OWNER_JID);
-            console.log('✅ AutoMediaRemover inicializado');
-        }
-
         // Verifica duplicatas
         const uniqueId = getMessageUniqueId(message.key);
-        if (processedMessages.has(uniqueId)) {
-            return;
-        }
+        if (processedMessages.has(uniqueId)) return;
         
         processedMessages.add(uniqueId);
         cleanMessageCache();
         
         // Validações básicas
-        if (!message?.key || !message?.message) {
-            return;
-        }
+        if (!message?.key || !message?.message) return;
 
         const from = message.key.remoteJid;
         const userId = message.key.participant || message.key.remoteJid;
@@ -87,48 +72,40 @@ export async function handleMessages(sock, message) {
             message.message.videoMessage?.caption || '';
 
         // ============================================
-        // 🔥 REMOÇÃO AUTOMÁTICA DE MÍDIAS (PRIORIDADE MÁXIMA)
-        // ============================================
-        // Processa ANTES de verificar se é mensagem do bot
-        await autoMediaRemover.processMessage(message);
-
-        // ============================================
         // 🛡️ CONTROLE DE MENSAGENS DO BOT
         // ============================================
         if (message.key.fromMe) {
             const lowerContent = content.toLowerCase().trim();
             const trimmedContent = content.trim();
             
-            // Permite comandos e mensagens específicas do bot
+            // ✅ PERMITE: mensagens com #all damas (para AutoTag funcionar)
             if (lowerContent.includes('#all damas')) {
                 if (DEBUG_MODE) console.log('✅ Bot usando #all damas - permitido');
             }
-            else if (trimmedContent.startsWith('#') || 
-                     trimmedContent.startsWith('!') || 
-                     trimmedContent.startsWith('@') ||
-                     trimmedContent.startsWith('/')) {
+            // ✅ PERMITE: comandos que começam com #, ! ou @
+            else if (trimmedContent.startsWith('#') || trimmedContent.startsWith('!') || trimmedContent.startsWith('@')) {
                 if (DEBUG_MODE) console.log('✅ Comando do bot - permitido');
             }
+            // ❌ BLOQUEIA: qualquer outra mensagem do bot
             else {
                 if (DEBUG_MODE) console.log('⏭️ Ignorado: mensagem comum do bot');
                 return;
             }
         }
 
-        // Ignora mensagens vazias (após remoção de mídia)
-        if (!content?.trim()) {
-            return;
-        }
+        // Ignora mensagens vazias
+        if (!content?.trim()) return;
 
         // Log apenas se DEBUG_MODE ativo
         if (DEBUG_MODE) {
             console.log(`📨 [${new Date().toLocaleTimeString()}] ${userId} em ${from}: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`);
         }
 
+        // Normaliza conteúdo para comparações
         const lowerContent = content.toLowerCase().trim();
 
         // ============================================
-        // 👑 MENU OWNER (COMANDO SECRETO)
+        // 👑 MENU OWNER (PRIORIDADE MÁXIMA - COMANDO SECRETO)
         // ============================================
         if (lowerContent === '#dmlukownner') {
             const ownerHandled = await handleOwnerMenu(sock, from, userId, content, OWNER_NUMBERS, message);
@@ -138,36 +115,24 @@ export async function handleMessages(sock, message) {
             }
         }
 
-        // ============================================
-        // 💌 CONFISSÕES (privado)
-        // ============================================
+        // 💌 CONFISSÕES (prioridade máxima no privado)
         const isPrivateChat = !from.endsWith('@g.us') && !from.includes('@newsletter');
         if (isPrivateChat) {
             const handled = await confissoesHandler.handlePrivateMessage(sock, message, from, userId, content);
-            if (handled) {
-                return;
-            }
+            if (handled) return;
         }
 
-        // ============================================
-        // 🎵 COMANDO #atualizaraudios
-        // ============================================
+        // 🎵 Comando #atualizaraudios (prioridade alta)
         if (olhinhoHandler.isComandoAtualizar && olhinhoHandler.isComandoAtualizar(message)) {
             await olhinhoHandler.handleComandoAtualizar(sock, message);
             return;
         }
 
-        // ============================================
-        // 👁️ REAÇÕES DE OLHINHO
-        // ============================================
+        // 👁️ Reações de olhinho
         const isReaction = await olhinhoHandler.handleReactionFromMessage(sock, message);
-        if (isReaction) {
-            return;
-        }
+        if (isReaction) return;
 
-        // ============================================
-        // 🛡️ MODERAÇÃO EM GRUPOS
-        // ============================================
+        // 🛡️ Moderação em grupos
         if (from.endsWith('@g.us')) {
             await Promise.all([
                 moderacaoAvancada(sock, message),
@@ -175,34 +140,23 @@ export async function handleMessages(sock, message) {
             ]);
         }
 
-        // ============================================
-        // 🔥 REPLYTAG
-        // ============================================
+        // 🔥 ReplyTag (respostas com #totag)
         if (message.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
             const replyResult = await replyTag.processReply(sock, from, userId, content, messageKey, message);
-            if (replyResult?.processed) {
-                return;
-            }
+            if (replyResult?.processed) return;
         }
 
+        // Comandos admin ReplyTag
         const replyAdminHandled = await replyTag.handleAdminCommands(sock, from, userId, content);
-        if (replyAdminHandled) {
-            return;
-        }
+        if (replyAdminHandled) return;
 
-        // ============================================
-        // 📋 COMANDO #regras
-        // ============================================
+        // 📋 Comando #regras (público)
         if (lowerContent.startsWith('#regras')) {
             const regrasProcessed = await processarComandoRegras(sock, message);
-            if (regrasProcessed) {
-                return;
-            }
+            if (regrasProcessed) return;
         }
 
-        // ============================================
-        // 🚨 MODERAÇÃO - ALERTA E REGRAS
-        // ============================================
+        // 🚨 COMANDOS DE MODERAÇÃO
         if (lowerContent === '#atualizarregras' || lowerContent.includes('#alerta')) {
             if (DEBUG_MODE) console.log(`🔍 Comando detectado: ${lowerContent}`);
             
@@ -213,62 +167,47 @@ export async function handleMessages(sock, message) {
             }
         }
 
-        // ============================================
-        // 🎨 COMANDO #stickerdamas
-        // ============================================
+        // 🎨 Comando #stickerdamas
         if (lowerContent.startsWith('#stickerdamas')) {
             await handleStickerCommand(sock, message);
             return;
         }
 
-        // ============================================
-        // 💌 COMANDOS DE CONFISSÕES (admin)
-        // ============================================
+        // 💌 Comandos de confissões (admin) - apenas em grupos
         if (from.endsWith('@g.us')) {
             if (lowerContent === '#avisarconfissoes') {
                 const avisoPosted = await confissoesHandler.postarAvisoConfissoes(sock, from, userId, messageKey);
-                if (avisoPosted) {
-                    return;
-                }
+                if (avisoPosted) return;
             }
             
             if (lowerContent === '#postarconfissoes') {
                 const confissaoPosted = await confissoesHandler.handleManualPost(sock, from, userId, messageKey);
-                if (confissaoPosted) {
-                    return;
-                }
+                if (confissaoPosted) return;
             }
         }
 
-        // ============================================
-        // 🔮 SIGNOS
-        // ============================================
+        // 🔮 COMANDOS DE SIGNOS (prioridade antes dos comandos gerais)
+        // Comandos: #damastaro, #atualizarsignos, !signo [nome]
         const signosHandled = await handleSignos(sock, message);
         if (signosHandled) {
             if (DEBUG_MODE) console.log('✅ Comando de signos processado');
             return;
         }
 
-        // ============================================
-        // 🔒 COMANDOS DE GRUPO
-        // ============================================
+        // 🔒 COMANDOS DE GRUPO (EMERGÊNCIA) - #rlink, #closegp, #opengp, #f, #a
         const groupCommandHandled = await handleGroupCommands(sock, message);
         if (groupCommandHandled) {
             if (DEBUG_MODE) console.log('✅ Comando de grupo processado');
             return;
         }
 
-        // ============================================
-        // 📋 COMANDOS POR PRIORIDADE
-        // ============================================
+        // Comandos por prioridade
         const handled = await processCommandPriorities(
             sock, message, from, userId, content,
             OWNER_NUMBERS, autoTag, pool
         );
 
-        // ============================================
-        // 📝 COMANDOS BÁSICOS
-        // ============================================
+        // Comandos básicos
         if (!handled) {
             await handleBasicCommands(sock, message, from, userId, content, pool);
         }
@@ -336,7 +275,7 @@ export async function handleGroupParticipantsUpdate(sock, update) {
 }
 
 // ============================================
-// 📊 UTILITÁRIOS E EXPORTAÇÕES
+// 📊 UTILITÁRIOS
 // ============================================
 export function getCacheStats() {
     return {
@@ -350,11 +289,4 @@ export function clearMessageCache() {
     const size = processedMessages.size;
     processedMessages.clear();
     if (DEBUG_MODE) console.log(`🧹 Cache limpo: ${size} mensagens`);
-}
-
-// ============================================
-// 🎮 ACESSO AO AUTO MEDIA REMOVER (para comandos)
-// ============================================
-export function getAutoMediaRemover() {
-    return autoMediaRemover;
 }
