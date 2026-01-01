@@ -1,27 +1,28 @@
 // codigos/handlers/message/olhinhoHandler.js
 // Handler para detectar e avisar quando alguém coloca reação de olhinho
-// VERSÃO IGUAL AO hqseroticos.js - CARREGA DO GITHUB
+// VERSÃO STANDALONE - NÃO USA githubCacheManager
+// CORREÇÃO: Quote correto da mensagem original com olhinho
 
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import axios from 'axios';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import githubCache from '../../utils/githubCacheManager.js';
-
-const execPromise = promisify(exec);
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ⭐ CONFIGURAR FFMPEG
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+
 console.log('✅ olhinhoHandler.js CARREGADO!');
 
-// URL do repositório GitHub
-const URL_AUDIOS_JSON = 'https://raw.githubusercontent.com/LucasNascimento25/audios-damas-bt/main/audios.json';
+// URL CORRETA DO REPOSITÓRIO GITHUB
+const URL_AUDIOS_JSON = 'https://raw.githubusercontent.com/LucasNascimento25/olhinho-audio-bt/refs/heads/main/audios-bt.json';
 
-// Cache dos áudios em memória (IGUAL AO hqseroticos.js)
+// Cache dos áudios em memória
 let audios = [];
 let ultimaAtualizacao = null;
 
@@ -33,8 +34,180 @@ export class OlhinhoHandler {
         this.olhinhoEmojis = ['👁️', '👁', '👀'];
         this.processedReactions = new Set();
         
+        // Array de mensagens em sequência
+        this.mensagens = [
+  '😏📸 E aí, tá escondendo o rosto ou só gosta de suspense mesmo?',
+  '👁️💥 Olho aqui, rosto não! Não me faça ir aí te arrastar!',
+  '😎🔥 Cadê você? Se não mandar a foto agora, eu começo a inventar histórias!',
+  '👀🤔 Só o olho? Achei que ia ver uma pessoa, não um emoji 3D!',
+  '😂👁️ Manda o resto da cara aí, parcelado tá valendo!',
+  '🔍😅 FBI investigando: onde está o restante dessa pessoa?',
+  '👁️🚨 Alerta vermelho! Temos apenas 10% de uma foto aqui!',
+  '😏💬 Esse olho tá famoso, mas cadê o artista completo?',
+  '🤨📱 Mano, seu celular só tem câmera pra olho é?',
+  '😂🎭 Tá fazendo cosplay de ciclope ou é tímido mesmo?',
+  '👁️⚠️ URGENTE: Pessoa desaparecida! Só encontramos um olho!',
+  '🔥😎 Esse mistério todo... você é famoso(a) ou procurado(a)?',
+  '👀💭 Tô começando a achar que você é só um olho mesmo!',
+  '😅🎪 Circo quer saber se você tá disponível pra número de mágica!',
+  '🤣📸 Próximo capítulo: a orelha! Aguardamos ansiosos!',
+  '👁️🎬 Trailer tá bom, mas cadê o filme completo?',
+  '😏🕵️ Sherlock Holmes desistiu de descobrir sua cara!',
+  '🤔🧩 Tô montando um quebra-cabeça aqui, me ajuda mandando o resto!',
+  '👀🚀 Houston, encontramos apenas um olho! Precisamos de reforços!',
+  '😂🎨 Picasso que te ensinou a tirar foto foi?',
+  '🔍👁️ CSI pediu pra mandar a foto completa pra investigação!',
+  '😎💥 Manda logo essa cara senão vou ter que adivinhar!',
+  '🤨📷 Seu celular tem defeito ou você que é artista?',
+  '👁️😅 Manda aí! Prometo não fazer meme... mentira, não prometo não!',
+  '🔥🤔 Esse suspense tá melhor que série da Netflix!',
+  '😂👤 Cadê o resto? Ficou na fila do SUS esperando?',
+  '👀💬 Olho bonito, mas quero ver o pacote completo!',
+  '🎭😏 Tá economizando internet? Manda aos poucos não!',
+  '🤣🔎 Google Lens desistiu de identificar você!',
+  '👁️⏰ Tô esperando desde ontem o resto dessa foto!',
+  '😅🎪 Já pensou em trabalhar com efeitos especiais?',
+  '🔥👀 Só falta mandar a íris separada agora!',
+  '😂📱 Seu celular deve ter a opção "modo testemunha protegida"!',
+  '🤔💭 Tô criando 15 versões diferentes de como você deve ser!',
+  '👁️🚨 ATENÇÃO: Envie a foto completa em até 5 minutos ou vira meme!',
+  '😎🎬 Essa enrolação tá parecendo novela mexicana!',
+  '🤨🔍 Até o Google não acha o resto de você!',
+  '😂🧙 Magia? Bruxaria? Câmera quebrada? Me explica isso!',
+  '👀💥 Manda logo antes que eu desenhe o resto!',
+  '🔥😏 Seu rosto tá em HD ou só o olho mesmo?',
+  '🤣📸 Fotógrafo pediu demissão de vergonha!',
+  '👁️🎯 Acertei um olho, faltam as outras partes!',
+  '😅🕵️ Polícia Federal quer saber sua localização... da cara toda!',
+  '🤔💬 Isso é arte moderna ou timidez crônica?',
+  '😂🎭 Se não mandar agora, boto sua cara no gerador de IA!',
+  '👀🚀 NASA detectou apenas 1/10 de uma pessoa nessa foto!',
+  '🔥😎 Quanto tá cobrando pra ver o resto? Aceita pix?',
+  '🤨📷 Seu celular tem a opção "modo espião" ativada!',
+  '😂🧩 Vou juntar as fotos de todo mundo pra montar você!',
+  '👁️💭 Aposto que o resto da cara é mais legal que esse suspense!',
+  '😏🎪 Circo ligou, quer você pro número do homem invisível!',
+  '🤣🔎 FBI, CIA e INTERPOL desistiram de te achar completo!',
+  '👀⚡ Chega de mistério! Tá parecendo programa de rádio!',
+  '🔥🤔 Só eu que sinto que tô sendo trollado aqui?',
+  '😅📸 Economizando megapixel é nova moda?',
+  '🤨💬 Vou começar a cobrar por cada segundo de espera!',
+  '😂👤 Seu rosto tá bloqueado por direitos autorais?',
+  '👁️🎬 Esse teaser tá melhor que trailer de Vingadores!',
+  '😎💥 5... 4... 3... Manda logo essa cara aí!',
+  '🤣🧙 Harry Potter tá pedindo aula de invisibilidade com você!',
+  '👀🚨 ÚLTIMA CHAMADA: Mostre sua cara ou vire lenda do grupo!',
+  '🔥😏 Tá guardando o rosto pra ocasião especial é?',
+  '😂📱 Apple vai lançar iPhone com modo "só olho" inspirado em você!',
+  '🤔🎯 Tô jogando dardo no escuro tentando adivinhar sua cara!',
+  '👁️😅 Única pessoa que manda currículo só com o olho!',
+  '😎🔍 Polícia científica pediu mais evidências!',
+  '🤨💭 Será que existe mesmo ou é só um olho falante?',
+  '😂🎭 Resumo da ópera: cadê você de verdade?',
+  '👀🚀 SpaceX encontrou mais coisa em Marte do que eu aqui!',
+  '🔥🤣 Tô quase botando sua cara no photoshop!',
+  '😅📸 Câmera frontal morreu de desgosto?',
+  '🤔💬 Esse olho tá carregando o grupo nas costas!',
+  '😂👤 Procura-se: o resto dessa pessoa. Recompensa: risadas!',
+  '👁️🎪 Mágico quer saber seu segredo de desaparecer!',
+  '😏💥 Vai mandar ou vou ter que hackear seu celular?',
+  '🤨🧩 Falta 90% ainda pra completar esse puzzle!',
+  '😂🔎 Detetive Pikachu desistiu do caso!',
+  '👀⚡ Explosão de curiosidade em 3... 2... 1...!',
+  '🔥😎 Esse olho já virou celebridade do grupo!',
+  '🤣📱 Tutorial: Como aparecer sem aparecer!',
+  '😅🕵️ Operação Cara Limpa: missão fracassada!',
+  '🤔💭 Já sei! Você é um olho que ganhou vida!',
+  '😂🎬 Suspense do ano: Onde está Wally versão 2.0!',
+  '👁️🚨 Alerta: Rosto em falta há 3 horas!',
+  '😎💬 Olho lindo, mas não dá pra namorar só um olho né!',
+  '🤨🔥 Tá fazendo greve do rosto é?',
+  '😂👤 Seu rosto tá de férias?',
+  '👀🎯 Target acquired... ou quase né!',
+  '🔥😏 Tá economizando beleza pra vender depois?',
+  '🤣📸 Instagram vs Realidade ao extremo!',
+  '😅🧙 Você é o novo membro dos X-Men: Olho Misterioso!',
+  '🤔💥 Bora lá! Confia! Ninguém vai zoar... MUITO!',
+  '😂🕵️ Até o Google Fotos desistiu de te reconhecer!',
+  '👁️🚀 NASA confirma: é vida inteligente, mas só 10% dela!',
+  '😎💬 Esse olho aí já ganhou Oscar de melhor suspense!',
+  '🤨🎭 Teatro do olho misterioso apresenta: nunca saberemos!',
+  '🔥🤣 Vou fazer enquete: quem acha que você existe de verdade?',
+  '😂📱 Seu celular tem a opção "modo vergonha" ligada!',
+  '👀💭 Tô imaginando 500 versões diferentes de você!',
+  '😅🔎 Procurado vivo ou morto... ou pelo menos completo!',
+  '🤔🎪 Ilusionista David Copperfield perdeu pro seu sumiço!',
+  '😂💥 Bora! 3... 2... 1... MANDA!',
+  '👁️🚨 Polícia da selfie te procura!',
+  '😎🔥 Esse olho tá mais famoso que você completo seria!',
+  '🤨😂 Alguém sabe CPF de olho? Vou registrar esse aqui!',
+  '🤣📸 Fotógrafa: "Say cheese!" Você: "Say eye!"',
+  '👀💬 Grupo já aceitou: você é o olho oficial daqui!',
+  '🔥😏 Tô contando até 10... ah, não, até 100!',
+  '😂🧩 Puzzle do ano: monte essa pessoa se conseguir!',
+  '😅🕵️ Investigação concluída: você é feito só de olho mesmo!',
+  '🤔💭 Plotwist: você é um olho gigante com pernas!',
+  '😂🎬 Roteiro da Netflix: O Mistério do Olho Eterno!',
+  '👁️🚀 Até ET mostrou mais a cara que você!',
+  '😎⚡ Sua cara tá em manutenção é?',
+  '🤨🔥 Sinceramente, tô mais curioso que gato agora!',
+  '😂👤 Seu rosto foi sequestrado? Chama o resgate!',
+  '👀💥 Última chance antes de eu criar sua cara no Paint!',
+  '🔥😏 Quanto tempo mais? Tô ficando velho esperando!',
+  '🤣📱 Manual do celular: Capítulo 50 - Como tirar foto completa!',
+  '😅🎯 Acertei o olho, errei os outros 90%!',
+  '🤔💬 Você é tímido ou tá fazendo pegadinha?',
+  '😂🧙 Feitiço de invisibilidade deu 90% certo!',
+  '👁️🚨 URGENTÍSSIMO: Mande a foto completa ou vira print!',
+  '😎🔍 Esse caso é pra Scooby-Doo resolver!',
+  '🤨💭 Tá escondendo o rosto pra não virar meme né? Tarde demais!',
+  '🔥😂 Vai mandar ou vou ter que te desenhar?',
+  '😂📸 Essa foto tá no modo "demonstração gratuita"!',
+  '👀🎪 Circo quer contratar pra número de aparição!',
+  '😅💥 Bora! Todo mundo tá esperando! Não decepciona!',
+  '🤔🔎 Tô pensando em abrir uma vaquinha pra ver sua cara!',
+  '😂🎭 Dramalhão: O Olho Que Ninguém Viu Por Inteiro!',
+  '👁️⚡ Se não mandar agora, vou criar tua cara no Dall-E!',
+  '😎💬 Spoiler: ninguém vai te julgar! Bora lá!',
+  '🤨🚀 Essa saga tá mais longa que Star Wars!',
+  '🔥😏 Prometo não fazer meme... de novo... muito!',
+  '😂👤 Seu rosto tá em quarentena ainda?',
+  '🤣📱 Celular bugou e tirou só 1/10 da foto!',
+  '👀💭 Já criei tanta expectativa que você vai ter que aparecer de coroa!',
+  '😅🕵️ Caso arquivado: O Rosto Que Nunca Apareceu!',
+  '🤔🎯 Aposto que todo mundo já esqueceu como você é!',
+  '😂💥 ATENÇÃO: Essa é sua última chance de não virar lenda!',
+  '👁️🚨 Breaking News: Olho continua sozinho no grupo!',
+  '😎🔥 Seu rosto tá em manutenção preventiva?',
+  '🤨😂 Já aceitamos: você É o olho. Não existe mais nada!',
+  '🤣📸 Parabéns! Você inventou a foto minimalista!',
+  '👀💬 Tô esperando mais ansioso que criança em véspera de Natal!',
+  '🔥😏 Se não mandar, vou colocar sua cara numa figurinha aleatória!',
+  '😂🧩 Juntei todos os olhos do grupo, achei o seu repetido!',
+  '😅🎪 Houdini tá com inveja desse desaparecimento!',
+  '🤔💭 Será que você existe mesmo ou é bot?',
+  '😂🎬 Trilogia completa: O Olho, A Lenda, O Mistério!',
+  '👁️🚀 Elon Musk quer saber se você mora em outra dimensão!'
+];
+        
+        // Índice para rotação sequencial das mensagens
+        this.indiceMensagemAtual = 0;
+        
         // Inicia carregamento
         this.inicializar();
+    }
+    
+    /**
+     * Retorna a próxima mensagem na sequência (rotação circular)
+     */
+    getProximaMensagem() {
+        const mensagem = this.mensagens[this.indiceMensagemAtual];
+        console.log(`💬 Mensagem ${this.indiceMensagemAtual + 1}/${this.mensagens.length}: ${mensagem}`);
+        
+        // Avança para próxima (circular)
+        this.indiceMensagemAtual = (this.indiceMensagemAtual + 1) % this.mensagens.length;
+        
+        return mensagem;
     }
 
     async inicializar() {
@@ -141,44 +314,73 @@ export class OlhinhoHandler {
     }
 
     /**
-     * Converte áudio para formato Opus
+     * Converte áudio para formato Opus usando fluent-ffmpeg
      */
     async converterParaOpus(inputBuffer) {
-        try {
-            console.log('🔄 Convertendo para Opus...');
-            const tempDir = path.join(__dirname, '../../../temp');
-
-            if (!fs.existsSync(tempDir)) {
-                fs.mkdirSync(tempDir, { recursive: true });
-            }
-
-            const timestamp = Date.now();
-            const inputPath = path.join(tempDir, `input_${timestamp}.mp3`);
-            const outputPath = path.join(tempDir, `output_${timestamp}.opus`);
-
-            fs.writeFileSync(inputPath, inputBuffer);
-
-            const comando = `ffmpeg -i "${inputPath}" -c:a libopus -b:a 96k -vbr on -ac 1 "${outputPath}" -y`;
-            await execPromise(comando);
-
-            const audioConvertido = fs.readFileSync(outputPath);
-
+        return new Promise((resolve) => {
             try {
-                fs.unlinkSync(inputPath);
-                fs.unlinkSync(outputPath);
-            } catch (e) {}
+                console.log('🔄 Convertendo para Opus (formato PTT)...');
+                const tempDir = path.join(__dirname, '../../../temp');
 
-            console.log(`✅ Convertido! (${audioConvertido.length} bytes)`);
-            return audioConvertido;
+                if (!fs.existsSync(tempDir)) {
+                    fs.mkdirSync(tempDir, { recursive: true });
+                }
 
-        } catch (error) {
-            console.error('❌ Erro ao converter:', error.message);
-            return null;
-        }
+                const timestamp = Date.now();
+                const inputPath = path.join(tempDir, `input_${timestamp}.mp3`);
+                const outputPath = path.join(tempDir, `output_${timestamp}.ogg`);
+
+                fs.writeFileSync(inputPath, inputBuffer);
+
+                ffmpeg(inputPath)
+                    .audioCodec('libopus')
+                    .audioBitrate('48k')
+                    .audioChannels(1)
+                    .audioFrequency(48000)
+                    .format('ogg')
+                    .on('error', (err) => {
+                        console.warn('⚠️ FFmpeg falhou:', err.message);
+                        try {
+                            if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+                            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+                        } catch (e) {}
+                        resolve(null);
+                    })
+                    .on('end', () => {
+                        try {
+                            if (!fs.existsSync(outputPath)) {
+                                console.warn('⚠️ Arquivo de saída não foi criado');
+                                fs.unlinkSync(inputPath);
+                                resolve(null);
+                                return;
+                            }
+
+                            const audioConvertido = fs.readFileSync(outputPath);
+                            
+                            try {
+                                fs.unlinkSync(inputPath);
+                                fs.unlinkSync(outputPath);
+                            } catch (e) {}
+
+                            console.log(`✅ Convertido para Opus: ${(audioConvertido.length / 1024).toFixed(2)} KB`);
+                            resolve(audioConvertido);
+                        } catch (error) {
+                            console.error('❌ Erro ao ler arquivo convertido:', error.message);
+                            resolve(null);
+                        }
+                    })
+                    .save(outputPath);
+
+            } catch (error) {
+                console.error('❌ Erro na conversão:', error.message);
+                resolve(null);
+            }
+        });
     }
 
     /**
-     * Envia o áudio como PTT
+     * Envia o áudio como PTT (Push-to-Talk / Áudio de Voz)
+     * CORREÇÃO: Passa a mensagem completa para quote, não apenas a key
      */
     async sendAudio(sock, jid, quotedMessage = null) {
         try {
@@ -191,6 +393,8 @@ export class OlhinhoHandler {
                 return false;
             }
 
+            console.log(`🎯 Enviando: ${audioInfo.nome}`);
+
             // Baixa o áudio
             const audioBuffer = await this.downloadAudioBuffer(audioInfo.url);
             
@@ -199,9 +403,11 @@ export class OlhinhoHandler {
                 return false;
             }
 
+            // ✅ CORREÇÃO: Passa a mensagem completa, não apenas a key
             const sendOptions = quotedMessage ? { quoted: quotedMessage } : {};
 
-            // Tenta converter para Opus
+            // ESTRATÉGIA 1: Opus com PTT (PREFERENCIAL - aparece como áudio de voz)
+            console.log('🎤 Tentando enviar como Opus PTT...');
             const audioOpus = await this.converterParaOpus(audioBuffer);
 
             if (audioOpus) {
@@ -212,15 +418,17 @@ export class OlhinhoHandler {
                         ptt: true
                     }, sendOptions);
 
-                    console.log(`✅ Áudio enviado: ${audioInfo.nome}`);
+                    console.log(`✅ Áudio PTT enviado com sucesso: ${audioInfo.nome}`);
                     console.log('========================================\n');
                     return true;
                 } catch (err) {
-                    console.error(`❌ Opus falhou: ${err.message}`);
+                    console.error(`⚠️ Opus PTT falhou: ${err.message}`);
+                    console.log('Tentando fallback...');
                 }
             }
 
-            // Fallback: tenta MP3 direto
+            // ESTRATÉGIA 2: MP3 com PTT (fallback)
+            console.log('🎤 Tentando enviar como MP3 PTT...');
             try {
                 await sock.sendMessage(jid, {
                     audio: audioBuffer,
@@ -228,18 +436,20 @@ export class OlhinhoHandler {
                     ptt: true
                 }, sendOptions);
 
-                console.log(`✅ Áudio enviado (MP3): ${audioInfo.nome}`);
+                console.log(`✅ Áudio PTT enviado (MP3): ${audioInfo.nome}`);
                 console.log('========================================\n');
                 return true;
             } catch (err) {
-                console.error(`❌ MP3 falhou: ${err.message}`);
+                console.error(`❌ MP3 PTT falhou: ${err.message}`);
             }
 
-            console.error('❌ Todas as estratégias falharam');
+            console.error('❌ Todas as estratégias PTT falharam');
+            console.log('========================================\n');
             return false;
 
         } catch (error) {
-            console.error('❌ Erro ao enviar áudio:', error.message);
+            console.error('❌ Erro ao enviar áudio PTT:', error.message);
+            console.log('========================================\n');
             return false;
         }
     }
@@ -275,39 +485,16 @@ export class OlhinhoHandler {
 
             const isUserAdmin = await this.isAdmin(sock, from, userId);
 
-            let responseText;
-            if (isUserAdmin) {
-                responseText = `👀👑 *Eita! Admin colocando olhinho!* 😏\n\n` +
-                    `Não pense que vai escapar dessa não, chefe! 🤨\n` +
-                    `Admin também tem que participar! 📸\n\n` +
-                    `Se não mandar foto agora, paga miquinho! 🐒\n\n` +
-                    `*Escolha seu mico:*\n` +
-                    `🐔 Imitar uma galinha\n` +
-                    `🦆 Imitar um pato\n` +
-                    `🐒 Imitar um macaco\n` +
-                    `🐐 Imitar um bode\n` +
-                    `🐷 Imitar um porco\n` +
-                    `🎤 Cantar uma música\n\n` +
-                    `*Admin é exemplo, bora lá!* 💪👑✨`;
-            } else {
-                responseText = `👀✨ *Opa! Olhinho detectado, cadê o rostinho?* 📸😏\n\n` +
-                    `Se não mandar foto agora, paga miquinho! 🐒\n\n` +
-                    `*Escolha seu mico:*\n` +
-                    `🐔 Imitar uma galinha\n` +
-                    `🦆 Imitar um pato\n` +
-                    `🐒 Imitar um macaco\n` +
-                    `🐐 Imitar um bode\n` +
-                    `🐷 Imitar um porco\n` +
-                    `🎤 Cantar uma música\n\n` +
-                    `*Tá geral esperando, não vacila!* ⏰👁️‍🗨️👂😏`;
-            }
+            const responseText = this.getProximaMensagem();
 
+            // ✅ CORREÇÃO: Envia respondendo a mensagem ORIGINAL com olhinho
             await sock.sendMessage(from, { text: responseText }, { quoted: message });
 
             const delayAleatorio = Math.floor(Math.random() * (15000 - 10000 + 1)) + 10000;
             console.log(`⏰ Aguardando ${(delayAleatorio / 1000).toFixed(1)}s antes do áudio...`);
 
             setTimeout(async () => {
+                // ✅ CORREÇÃO: Áudio também responde a mensagem ORIGINAL com olhinho
                 await this.sendAudio(sock, from, message);
             }, delayAleatorio);
 
@@ -347,28 +534,22 @@ export class OlhinhoHandler {
 
                     const isUserAdmin = await this.isAdmin(sock, from, userId);
 
-                    let responseText;
-                    if (isUserAdmin) {
-                        responseText = `👀👑 *Eita! Admin colocando olhinho!* 😏\n\n` +
-                            `Não pense que vai escapar dessa não, admin! 🤨\n` +
-                            `Você também tem que participar! 📸\n\n` +
-                            `Se mandou olhinho, manda fotinha! 🫵✨`;
-                    } else {
-                        responseText = `👀✨ *Opa! Olhinho detectado, cadê o rostinho?* 📸😏\n\n` +
-                            `Se não mandar foto agora, paga miquinho! 🐒`;
-                    }
+                    const responseText = this.getProximaMensagem();
 
+                    // ✅ CORREÇÃO: Construir mensagem completa para quote
                     const quotedMsg = {
                         key: react.key,
                         message: reaction.message || {}
                     };
 
+                    // ✅ CORREÇÃO: Responde a mensagem que recebeu a reação de olhinho
                     await sock.sendMessage(from, { text: responseText }, { quoted: quotedMsg });
 
                     const delayAleatorio = Math.floor(Math.random() * (15000 - 10000 + 1)) + 10000;
                     console.log(`⏰ Aguardando ${(delayAleatorio / 1000).toFixed(1)}s antes do áudio...`);
 
                     setTimeout(async () => {
+                        // ✅ CORREÇÃO: Áudio também responde a mensagem que recebeu a reação
                         await this.sendAudio(sock, from, quotedMsg);
                     }, delayAleatorio);
 
@@ -386,13 +567,17 @@ export class OlhinhoHandler {
         console.log(`Áudios carregados: ${audios.length}`);
         console.log(`Índice atual: ${indiceAtual + 1}/${audios.length}`);
         console.log(`Última atualização: ${ultimaAtualizacao}`);
+        console.log(`URL configurada: ${URL_AUDIOS_JSON}`);
 
         if (audios.length > 0) {
             console.log('\n📋 Lista de áudios:');
-            audios.forEach((audio, idx) => {
+            audios.slice(0, 5).forEach((audio, idx) => {
                 const atual = idx === indiceAtual ? ' 👈 PRÓXIMO' : '';
                 console.log(`  ${idx + 1}. ${audio.nome}${atual}`);
             });
+            if (audios.length > 5) {
+                console.log(`  ... e mais ${audios.length - 5} áudios`);
+            }
         }
 
         console.log('=================================\n');
@@ -405,39 +590,62 @@ export class OlhinhoHandler {
 }
 
 /**
- * Carrega os áudios do GitHub (IGUAL AO carregarHQs do hqseroticos.js)
+ * Carrega os áudios do GitHub DIRETAMENTE (sem cache manager)
  */
 async function carregarAudios() {
     try {
-        console.log('🔄 [Audios] Carregando áudios...');
+        console.log('🔄 [Audios] Carregando áudios do GitHub...');
+        console.log(`📡 URL: ${URL_AUDIOS_JSON}`);
         
-        const result = await githubCache.fetch(
-            URL_AUDIOS_JSON,
-            'olhinho-audios',
-            (data) => {
-                return (data.audios || []).filter(a => a.ativo === true);
-            }
-        );
+        const response = await fetch(URL_AUDIOS_JSON, {
+            method: 'GET',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; WhatsAppBot/1.0)',
+                'Accept': 'application/json'
+            },
+            timeout: 10000
+        });
 
-        if (result.success) {
-            audios = result.data;
-            ultimaAtualizacao = new Date();
-            const origem = result.fromCache ? 'cache' : 'GitHub';
-            const count = Array.isArray(audios) ? audios.length : 'N/A';
-            console.log(`✅ [Audios] ${count} áudios carregados (${origem})`);
-            return true;
-        } else {
-            console.error('❌ [Audios] Falha ao carregar áudios');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        
+        // Filtra apenas áudios ativos
+        const audiosAtivos = (data.audios || []).filter(a => a.ativo === true);
+        
+        if (audiosAtivos.length === 0) {
+            console.error('❌ [Audios] Nenhum áudio ativo encontrado no JSON');
             return false;
         }
+
+        audios = audiosAtivos;
+        ultimaAtualizacao = new Date();
+        
+        console.log(`✅ [Audios] ${audios.length} áudios carregados com sucesso!`);
+        console.log('📋 Primeiros áudios:');
+        audios.slice(0, 3).forEach((a, i) => {
+            console.log(`  ${i + 1}. ${a.nome} (${a.id})`);
+        });
+        
+        return true;
+
     } catch (error) {
-        console.error('❌ [Audios] Erro:', error.message);
+        console.error('❌ [Audios] Erro ao carregar:', error.message);
+        console.error('Stack:', error.stack);
         return false;
     }
 }
 
-// Inicializar carregando os áudios (IGUAL AO hqseroticos.js)
+// Inicializar carregando os áudios
 console.log('🚀 Iniciando carregamento inicial dos áudios...');
-carregarAudios();
+carregarAudios().then(success => {
+    if (success) {
+        console.log('✅ Sistema de áudios PTT pronto!');
+    } else {
+        console.error('❌ Falha ao inicializar sistema de áudios');
+    }
+});
 
 export default new OlhinhoHandler();

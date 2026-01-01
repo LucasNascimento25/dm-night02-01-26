@@ -1,6 +1,6 @@
 // alertaHandler.js - Sistema de Moderação Completo
 // Versão otimizada com envio imediato de áudios
-// AJUSTADO PARA 4 ÁUDIOS
+// CORRIGIDO - URL DO GITHUB AJUSTADA
 
 import axios from 'axios';
 import fs from 'fs';
@@ -8,7 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import githubCache from "../utils/githubCacheManager.js";
+import fetch from 'node-fetch';
 
 const execPromise = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
@@ -20,8 +20,8 @@ console.log('✅ alertaHandler.js CARREGADO!');
 // CONFIGURAÇÕES
 // ============================================
 const CONFIG = {
-    URL_AUDIOS: 'https://raw.githubusercontent.com/LucasNascimento25/audio-regras/main/audios-regras.json',
-    CACHE_KEY: 'alertas-regras-audios',
+    // URL CORRETA COM /refs/heads/
+    URL_AUDIOS: 'https://raw.githubusercontent.com/LucasNascimento25/audio-regras/refs/heads/main/audios-regras.json',
     AUDIO_INTERVAL: 0, // ⚡ SEM INTERVALO - ENVIO IMEDIATO
     MAX_RETRIES: 3,
     DOWNLOAD_TIMEOUT: 30000,
@@ -31,43 +31,64 @@ const CONFIG = {
     AUDIOS_INDIVIDUAL: 4  // TODOS os 4 áudios para advertência individual
 };
 
+// Cache de áudios em memória
+let audiosCache = [];
+let ultimaAtualizacao = null;
+
 // ============================================
 // GERENCIAMENTO DE ÁUDIOS
 // ============================================
 async function carregarAudios(forceRefresh = false) {
     try {
-        console.log(`🔄 Carregando áudios das regras... ${forceRefresh ? '(FORÇANDO ATUALIZAÇÃO)' : ''}`);
+        console.log(`🔄 Carregando áudios das regras...${forceRefresh ? ' (FORÇANDO ATUALIZAÇÃO)' : ''}`);
+        console.log(`📡 URL: ${CONFIG.URL_AUDIOS}`);
         
-        const result = await githubCache.fetch(
-            CONFIG.URL_AUDIOS,
-            CONFIG.CACHE_KEY,
-            (data) => {
-                const audios = (data.audios || []).filter(a => a.ativo === true && a.comando === 'regras');
-                
-                if (CONFIG.DEBUG) {
-                    console.log(`🔍 Áudios filtrados: ${audios.length}`);
-                }
-                
-                return audios;
+        const response = await fetch(CONFIG.URL_AUDIOS, {
+            method: 'GET',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; WhatsAppBot/1.0)',
+                'Accept': 'application/json'
             },
-            forceRefresh
-        );
+            timeout: 10000
+        });
 
-        if (result.success && result.data && result.data.length > 0) {
-            const origem = result.fromCache ? 'cache' : 'GitHub';
-            console.log(`✅ ${result.data.length} áudios carregados (${origem})`);
-            
-            if (!result.fromCache || CONFIG.DEBUG) {
-                console.log('🎵 Lista:', result.data.map(a => a.nome).join(', '));
-            }
-            
-            return result.data;
-        } else {
-            console.error('❌ Nenhum áudio disponível');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        
+        // Filtra apenas áudios ativos com comando "regras"
+        const audiosAtivos = (data.audios || []).filter(a => 
+            a.ativo === true && a.comando === 'regras'
+        );
+        
+        if (audiosAtivos.length === 0) {
+            console.error('❌ [Regras] Nenhum áudio ativo encontrado no JSON');
             return [];
         }
+
+        // Corrige URLs dos áudios (adiciona /refs/heads/ se necessário)
+        const audiosCorrigidos = audiosAtivos.map(audio => ({
+            ...audio,
+            url: audio.url.includes('/refs/heads/')
+                ? audio.url
+                : audio.url.replace('/raw/main/', '/refs/heads/main/')
+        }));
+
+        audiosCache = audiosCorrigidos;
+        ultimaAtualizacao = new Date();
+        
+        console.log(`✅ [Regras] ${audiosCache.length} áudios carregados com sucesso!`);
+        console.log('📋 Primeiros áudios:');
+        audiosCache.slice(0, 3).forEach((a, i) => {
+            console.log(`  ${i + 1}. ${a.nome}`);
+        });
+        
+        return audiosCache;
+
     } catch (error) {
-        console.error('❌ Erro ao carregar áudios:', error.message);
+        console.error('❌ [Regras] Erro ao carregar:', error.message);
         if (CONFIG.DEBUG) console.error(error.stack);
         return [];
     }
@@ -76,9 +97,22 @@ async function carregarAudios(forceRefresh = false) {
 function converterParaRawUrl(url) {
     if (!url) return url;
     
-    return url.includes('github.com') && url.includes('/blob/')
-        ? url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/')
-        : url;
+    // Se já tem refs/heads, retorna direto
+    if (url.includes('/refs/heads/')) return url;
+    
+    // Converte /raw/main/ para /refs/heads/main/
+    if (url.includes('/raw/main/')) {
+        return url.replace('/raw/main/', '/refs/heads/main/');
+    }
+    
+    // Converte github.com/blob para raw.githubusercontent.com
+    if (url.includes('github.com') && url.includes('/blob/')) {
+        return url
+            .replace('github.com', 'raw.githubusercontent.com')
+            .replace('/blob/', '/refs/heads/');
+    }
+    
+    return url;
 }
 
 async function downloadAudioBuffer(url) {
@@ -96,6 +130,7 @@ async function downloadAudioBuffer(url) {
 
             const rawUrl = converterParaRawUrl(url);
             console.log(`📥 Baixando áudio (tentativa ${attempt + 1}/${CONFIG.MAX_RETRIES})...`);
+            if (CONFIG.DEBUG) console.log(`🔗 URL: ${rawUrl}`);
 
             const response = await axios.get(rawUrl, {
                 responseType: 'arraybuffer',
@@ -513,7 +548,8 @@ const alertaHandler = async (sock, message) => {
             return true;
         }
 
-        const audios = await carregarAudios();
+        const audios = audiosCache.length > 0 ? audiosCache : await carregarAudios();
+        
         if (!audios || audios.length === 0) {
             await sock.sendMessage(from, {
                 text: '❌ *Áudios não disponíveis no momento.*\n\n' +
@@ -656,7 +692,7 @@ const alertaHandler = async (sock, message) => {
 // ============================================
 // INICIALIZAÇÃO
 // ============================================
-console.log('🚀 Iniciando carregamento dos áudios...');
+console.log('🚀 Iniciando carregamento dos áudios de regras...');
 carregarAudios().then(audios => {
     if (audios && audios.length > 0) {
         console.log('✅ alertaHandler pronto para uso!');
