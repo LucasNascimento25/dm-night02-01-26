@@ -1,17 +1,18 @@
-// alertaHandler.js - Sistema de Moderação Simplificado
-// VERSÃO: APENAS POSTER + ÁUDIOS (sem mensagens de texto)
+// alertaHandler.js - Sistema de Moderação com Áudio PTT
+// VERSÃO CORRIGIDA: Filtra por "tipo" e não por "comando"
 
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import fetch from 'node-fetch';
+import ffmpeg from "fluent-ffmpeg";
+import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 
-const execPromise = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Configurar FFMPEG
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 console.log('✅ alertaHandler.js CARREGADO!');
 
@@ -20,28 +21,187 @@ console.log('✅ alertaHandler.js CARREGADO!');
 // ============================================
 const CONFIG = {
     URL_AUDIOS: 'https://raw.githubusercontent.com/LucasNascimento25/audio-regras/main/audios-regras.json',
-    // 🖼️ URL DO POSTER DAS REGRAS
     URL_POSTER: 'https://raw.githubusercontent.com/LucasNascimento25/audio-regras/main/poster-regras.jpg',
-    AUDIO_INTERVAL: 0,
-    MAX_RETRIES: 3,
     DOWNLOAD_TIMEOUT: 30000,
-    DEBUG: process.env.DEBUG === 'true',
-    AUDIOS_GRUPO: 4,
-    AUDIOS_INDIVIDUAL: 4
+    MAX_RETRIES: 3,
+    DELAY_ENTRE_AUDIOS: 2000, // 2 segundos entre cada áudio
+    DEBUG: process.env.DEBUG === 'true'
 };
 
 let audiosCache = [];
 let ultimaAtualizacao = null;
 
 // ============================================
-// FUNÇÃO CORRIGIDA DE CONVERSÃO DE URL
+// CONVERSÃO DE ÁUDIO (COPIADO DO CÓDIGO DE BOAS-VINDAS)
 // ============================================
+
+/**
+ * Converte áudio para Opus
+ */
+async function converterParaOpus(inputBuffer) {
+  return new Promise((resolve) => {
+    try {
+      const tempDir = path.join(__dirname, "../../../temp");
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+
+      const timestamp = Date.now();
+      const inputPath = path.join(tempDir, `input_${timestamp}.mp3`);
+      const outputPath = path.join(tempDir, `output_${timestamp}.ogg`);
+
+      fs.writeFileSync(inputPath, inputBuffer);
+
+      console.log("🔄 Convertendo para Opus...");
+
+      ffmpeg(inputPath)
+        .audioCodec('libopus')
+        .audioBitrate('48k')
+        .audioChannels(1)
+        .audioFrequency(48000)
+        .format('ogg')
+        .on('error', (err) => {
+          console.warn("⚠️ FFmpeg falhou:", err.message);
+          try {
+            if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+          } catch (e) {}
+          resolve(null);
+        })
+        .on('end', () => {
+          try {
+            if (!fs.existsSync(outputPath)) {
+              console.warn("⚠️ Arquivo de saída não foi criado");
+              fs.unlinkSync(inputPath);
+              resolve(null);
+              return;
+            }
+
+            const audioConvertido = fs.readFileSync(outputPath);
+            
+            try {
+              fs.unlinkSync(inputPath);
+              fs.unlinkSync(outputPath);
+            } catch (e) {}
+
+            console.log(`✅ Convertido para Opus: ${(audioConvertido.length / 1024).toFixed(2)} KB`);
+            resolve(audioConvertido);
+          } catch (error) {
+            console.error("❌ Erro ao ler arquivo convertido:", error.message);
+            resolve(null);
+          }
+        })
+        .save(outputPath);
+
+    } catch (error) {
+      console.error("❌ Erro na conversão:", error.message);
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * Envia áudio PTT com quote
+ */
+async function enviarAudioPTT(socket, groupId, audioUrl, quotedMessage, mentions = null) {
+  try {
+    console.log("\n========== ENVIANDO ÁUDIO PTT ==========");
+    console.log("📥 Baixando:", audioUrl);
+    
+    const response = await axios.get(audioUrl, {
+      responseType: "arraybuffer",
+      timeout: CONFIG.DOWNLOAD_TIMEOUT,
+      maxContentLength: 10 * 1024 * 1024,
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Accept': 'audio/*'
+      }
+    });
+    
+    const audioBuffer = Buffer.from(response.data);
+    
+    if (audioBuffer.length === 0) {
+      throw new Error("Buffer vazio");
+    }
+    
+    console.log(`✅ Baixado: ${(audioBuffer.length / 1024).toFixed(2)} KB`);
+
+    const sendOptions = {};
+    if (quotedMessage) {
+      sendOptions.quoted = quotedMessage;
+      console.log("✅ Usando quote na mensagem");
+    }
+
+    // Tenta converter para Opus primeiro
+    const audioOpus = await converterParaOpus(audioBuffer);
+
+    if (audioOpus) {
+      try {
+        const messageOptions = {
+          audio: audioOpus,
+          mimetype: 'audio/ogg; codecs=opus',
+          ptt: true
+        };
+
+        // Adiciona menções se fornecidas
+        if (mentions && mentions.length > 0) {
+          messageOptions.contextInfo = {
+            mentionedJid: mentions
+          };
+        }
+
+        await socket.sendMessage(groupId, messageOptions, sendOptions);
+
+        console.log("✅ Áudio PTT (Opus) enviado!");
+        console.log("====================================\n");
+        return true;
+      } catch (err) {
+        console.log(`⚠️ Opus falhou: ${err.message}`);
+      }
+    }
+
+    // Fallback MP3
+    try {
+      const messageOptions = {
+        audio: audioBuffer,
+        mimetype: 'audio/mpeg',
+        ptt: true
+      };
+
+      // Adiciona menções se fornecidas
+      if (mentions && mentions.length > 0) {
+        messageOptions.contextInfo = {
+          mentionedJid: mentions
+        };
+      }
+
+      await socket.sendMessage(groupId, messageOptions, sendOptions);
+
+      console.log("✅ Áudio PTT (MP3) enviado!");
+      console.log("====================================\n");
+      return true;
+    } catch (err) {
+      console.error(`❌ MP3 falhou: ${err.message}`);
+    }
+
+    return false;
+    
+  } catch (error) {
+    console.error("❌ Erro ao enviar áudio:", error.message);
+    return false;
+  }
+}
+
+// ============================================
+// GERENCIAMENTO DE ÁUDIOS
+// ============================================
+
 function converterParaRawUrl(url) {
     if (!url) return url;
     
     console.log(`🔧 URL original: ${url}`);
     
-    // Remove /refs/heads/ se existir (isso estava causando o erro!)
+    // Remove /refs/heads/ se existir
     url = url.replace('/refs/heads/', '/');
     
     // Se já está no formato raw correto, retorna
@@ -63,309 +223,168 @@ function converterParaRawUrl(url) {
     return url;
 }
 
-// ============================================
-// GERENCIAMENTO DE ÁUDIOS
-// ============================================
 async function carregarAudios(forceRefresh = false) {
     try {
         console.log(`🔄 Carregando áudios das regras...${forceRefresh ? ' (FORÇANDO ATUALIZAÇÃO)' : ''}`);
         console.log(`📡 URL: ${CONFIG.URL_AUDIOS}`);
         
-        const response = await fetch(CONFIG.URL_AUDIOS, {
-            method: 'GET',
+        const response = await axios.get(CONFIG.URL_AUDIOS, {
+            timeout: 10000,
             headers: {
-                'User-Agent': 'Mozilla/5.0 (compatible; WhatsAppBot/1.0)',
-                'Accept': 'application/json'
-            },
-            timeout: 10000
+                'User-Agent': 'Mozilla/5.0',
+                'Accept': 'application/json',
+                'Cache-Control': 'no-cache'
+            }
         });
 
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        if (!response.data || !response.data.audios) {
+            throw new Error('JSON inválido ou sem campo "audios"');
         }
 
-        const data = await response.json();
-        
-        const audiosAtivos = (data.audios || []).filter(a => 
-            a.ativo === true && a.comando === 'regras'
+        // ⚠️ CORREÇÃO: Filtra por "tipo": "advertencia" ao invés de "comando"
+        const audiosAtivos = response.data.audios.filter(a => 
+            a.ativo === true && a.tipo === 'advertencia'
         );
         
         if (audiosAtivos.length === 0) {
-            console.error('❌ [Regras] Nenhum áudio ativo encontrado no JSON');
+            console.error('❌ Nenhum áudio ativo encontrado no JSON');
+            console.log('📋 Áudios disponíveis no JSON:');
+            response.data.audios.forEach(a => {
+                console.log(`  - ${a.nome} (tipo: ${a.tipo}, ativo: ${a.ativo})`);
+            });
             return [];
         }
 
-        const audiosCorrigidos = audiosAtivos.map(audio => {
-            const urlCorrigida = converterParaRawUrl(audio.url);
-            return {
-                ...audio,
-                url: urlCorrigida
-            };
-        });
+        const audiosCorrigidos = audiosAtivos.map(audio => ({
+            ...audio,
+            url: converterParaRawUrl(audio.url)
+        }));
 
         audiosCache = audiosCorrigidos;
         ultimaAtualizacao = new Date();
         
-        console.log(`✅ [Regras] ${audiosCache.length} áudios carregados com sucesso!`);
-        console.log('📋 URLs corrigidas:');
+        console.log(`✅ ${audiosCache.length} áudios carregados com sucesso!`);
+        console.log('📋 Lista de áudios:');
         audiosCache.forEach((a, i) => {
             console.log(`  ${i + 1}. ${a.nome}`);
-            console.log(`     ${a.url}`);
         });
         
         return audiosCache;
 
     } catch (error) {
-        console.error('❌ [Regras] Erro ao carregar:', error.message);
+        console.error('❌ Erro ao carregar áudios:', error.message);
         if (CONFIG.DEBUG) console.error(error.stack);
         return [];
     }
 }
 
-async function downloadAudioBuffer(url) {
-    if (!url) {
-        throw new Error('URL do áudio não fornecida');
+/**
+ * Envia todos os áudios fazendo quote do poster
+ */
+async function sendAudiosComQuoteDoPoster(sock, groupId, audios, posterMessage, targetParticipant = null) {
+    if (!audios || audios.length === 0) {
+        console.log('⚠️ Nenhum áudio para enviar');
+        return;
     }
 
-    for (let attempt = 0; attempt < CONFIG.MAX_RETRIES; attempt++) {
+    console.log(`🎵 Iniciando envio de ${audios.length} áudios...`);
+
+    const mentions = targetParticipant ? [targetParticipant] : null;
+
+    for (let i = 0; i < audios.length; i++) {
+        const audio = audios[i];
+        
         try {
-            if (attempt > 0) {
-                const delay = 1000 * Math.pow(2, attempt - 1);
-                console.log(`⏰ Aguardando ${delay}ms antes da próxima tentativa...`);
-                await new Promise(resolve => setTimeout(resolve, delay));
+            console.log(`\n📤 Enviando áudio ${i + 1}/${audios.length}: ${audio.nome}`);
+            
+            const sucesso = await enviarAudioPTT(
+                sock,
+                groupId,
+                audio.url,
+                posterMessage,
+                mentions
+            );
+
+            if (sucesso) {
+                console.log(`✅ Áudio ${i + 1} enviado com sucesso`);
+            } else {
+                console.log(`⚠️ Falha ao enviar áudio ${i + 1}`);
             }
 
-            console.log(`📥 Baixando áudio (tentativa ${attempt + 1}/${CONFIG.MAX_RETRIES})...`);
-            console.log(`🔗 URL: ${url}`);
+            // Aguarda entre áudios (exceto no último)
+            if (i < audios.length - 1) {
+                console.log(`⏳ Aguardando ${CONFIG.DELAY_ENTRE_AUDIOS}ms...`);
+                await new Promise(resolve => setTimeout(resolve, CONFIG.DELAY_ENTRE_AUDIOS));
+            }
+            
+        } catch (error) {
+            console.error(`❌ Erro ao processar áudio ${i + 1}:`, error.message);
+        }
+    }
 
-            const response = await axios.get(url, {
+    console.log('\n✅ Envio de áudios concluído!');
+}
+
+// ============================================
+// DOWNLOAD DO POSTER
+// ============================================
+
+async function downloadPoster() {
+    let tentativa = 0;
+    
+    while (tentativa < CONFIG.MAX_RETRIES) {
+        try {
+            tentativa++;
+            console.log(`🖼️ Baixando poster (tentativa ${tentativa}/${CONFIG.MAX_RETRIES})...`);
+            
+            const urlCorrigida = converterParaRawUrl(CONFIG.URL_POSTER);
+            console.log(`📎 URL: ${urlCorrigida}`);
+            
+            const response = await axios.get(urlCorrigida, {
                 responseType: 'arraybuffer',
                 timeout: CONFIG.DOWNLOAD_TIMEOUT,
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (compatible; WhatsAppBot/1.0)',
-                    'Accept': 'audio/mpeg, audio/*, */*',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': 'image/jpeg, image/jpg, image/png, image/*',
                     'Cache-Control': 'no-cache'
                 },
-                maxRedirects: 5
+                maxRedirects: 5,
+                validateStatus: (status) => status === 200
             });
 
             if (!response.data || response.data.byteLength === 0) {
                 throw new Error('Buffer vazio recebido');
             }
 
-            console.log(`✅ Baixado: ${(response.data.byteLength / 1024).toFixed(2)} KB`);
+            console.log(`✅ Poster baixado: ${(response.data.byteLength / 1024).toFixed(2)} KB`);
             return Buffer.from(response.data);
 
         } catch (error) {
-            const errorMsg = error.response?.status 
-                ? `HTTP ${error.response.status}` 
-                : error.message;
+            console.error(`❌ Erro na tentativa ${tentativa}:`, error.message);
             
-            console.error(`❌ Tentativa ${attempt + 1} falhou: ${errorMsg}`);
+            if (error.response?.status === 404) {
+                console.error('⚠️ ARQUIVO poster-regras.jpg NÃO ENCONTRADO (404)');
+                console.error('⚠️ Verifique se o arquivo existe no repositório GitHub');
+                break;
+            }
             
-            if (attempt === CONFIG.MAX_RETRIES - 1) {
-                throw new Error(`Falha após ${CONFIG.MAX_RETRIES} tentativas: ${errorMsg}`);
+            if (tentativa < CONFIG.MAX_RETRIES) {
+                console.log(`⏳ Aguardando 2s antes da próxima tentativa...`);
+                await new Promise(r => setTimeout(r, 2000));
             }
         }
     }
-}
-
-// ============================================
-// DOWNLOAD DO POSTER
-// ============================================
-async function downloadPoster() {
-    try {
-        console.log('🖼️ Baixando poster das regras...');
-        
-        const urlCorrigida = converterParaRawUrl(CONFIG.URL_POSTER);
-        
-        const response = await axios.get(urlCorrigida, {
-            responseType: 'arraybuffer',
-            timeout: CONFIG.DOWNLOAD_TIMEOUT,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (compatible; WhatsAppBot/1.0)',
-                'Accept': 'image/jpeg, image/jpg, image/png, image/*',
-                'Cache-Control': 'no-cache'
-            },
-            maxRedirects: 5
-        });
-
-        if (!response.data || response.data.byteLength === 0) {
-            throw new Error('Buffer vazio recebido');
-        }
-
-        console.log(`✅ Poster baixado: ${(response.data.byteLength / 1024).toFixed(2)} KB`);
-        return Buffer.from(response.data);
-
-    } catch (error) {
-        console.error('❌ Erro ao baixar poster:', error.message);
-        if (CONFIG.DEBUG) console.error(error.stack);
-        return null;
-    }
-}
-
-async function converterParaOpus(inputBuffer) {
-    try {
-        const tempDir = path.join(__dirname, '../../../temp');
-        
-        if (!fs.existsSync(tempDir)) {
-            fs.mkdirSync(tempDir, { recursive: true });
-            console.log(`📁 Diretório temp criado: ${tempDir}`);
-        }
-
-        const timestamp = Date.now();
-        const inputPath = path.join(tempDir, `input_${timestamp}.mp3`);
-        const outputPath = path.join(tempDir, `output_${timestamp}.opus`);
-
-        fs.writeFileSync(inputPath, inputBuffer);
-        
-        const ffmpegCmd = `ffmpeg -i "${inputPath}" -c:a libopus -b:a 64k -ar 48000 -ac 1 -application voip -compression_level 10 "${outputPath}" -y`;
-        
-        if (CONFIG.DEBUG) {
-            console.log(`🔧 Executando: ${ffmpegCmd}`);
-        }
-        
-        await execPromise(ffmpegCmd);
-
-        if (!fs.existsSync(outputPath)) {
-            throw new Error('Arquivo Opus não foi criado');
-        }
-
-        const audioConvertido = fs.readFileSync(outputPath);
-
-        try {
-            fs.unlinkSync(inputPath);
-            fs.unlinkSync(outputPath);
-        } catch (e) {
-            if (CONFIG.DEBUG) console.log('⚠️ Erro ao limpar arquivos temp:', e.message);
-        }
-
-        console.log(`✅ Convertido para Opus: ${(audioConvertido.length / 1024).toFixed(2)} KB`);
-        return audioConvertido;
-
-    } catch (error) {
-        console.error('❌ Erro na conversão Opus:', error.message);
-        if (CONFIG.DEBUG) console.error(error.stack);
-        return null;
-    }
-}
-
-async function normalizarMp3(inputBuffer) {
-    try {
-        const tempDir = path.join(__dirname, '../../../temp');
-        
-        if (!fs.existsSync(tempDir)) {
-            fs.mkdirSync(tempDir, { recursive: true });
-        }
-
-        const timestamp = Date.now();
-        const inputPath = path.join(tempDir, `mp3_input_${timestamp}.mp3`);
-        const outputPath = path.join(tempDir, `mp3_output_${timestamp}.mp3`);
-
-        fs.writeFileSync(inputPath, inputBuffer);
-        
-        const ffmpegCmd = `ffmpeg -i "${inputPath}" -ar 48000 -b:a 128k -ac 1 "${outputPath}" -y`;
-        
-        if (CONFIG.DEBUG) {
-            console.log(`🔧 Normalizando MP3: ${ffmpegCmd}`);
-        }
-        
-        await execPromise(ffmpegCmd);
-
-        if (!fs.existsSync(outputPath)) {
-            throw new Error('Arquivo MP3 normalizado não foi criado');
-        }
-
-        const audioNormalizado = fs.readFileSync(outputPath);
-
-        try {
-            fs.unlinkSync(inputPath);
-            fs.unlinkSync(outputPath);
-        } catch (e) {
-            if (CONFIG.DEBUG) console.log('⚠️ Erro ao limpar arquivos temp MP3:', e.message);
-        }
-
-        console.log(`✅ MP3 normalizado: ${(audioNormalizado.length / 1024).toFixed(2)} KB`);
-        return audioNormalizado;
-
-    } catch (error) {
-        console.error('❌ Erro ao normalizar MP3:', error.message);
-        if (CONFIG.DEBUG) console.error(error.stack);
-        return null;
-    }
-}
-
-// ============================================
-// ENVIO DE ÁUDIOS COM QUOTE DO POSTER
-// ============================================
-async function sendAudiosComQuoteDoPoster(sock, jid, audios, posterMessage, targetParticipant = null) {
-    if (!audios || audios.length === 0) {
-        console.error('❌ Nenhum áudio disponível para envio');
-        return;
-    }
-
-    console.log(`\n🎵 Enviando ${audios.length} áudios IMEDIATAMENTE (com quote do poster)`);
-
-    for (let i = 0; i < audios.length; i++) {
-        try {
-            const audioInfo = audios[i];
-            
-            if (!audioInfo || !audioInfo.url) {
-                console.error(`❌ Áudio ${i + 1} não tem URL válida`);
-                continue;
-            }
-
-            console.log(`\n🎵 Enviando: ${audioInfo.nome} (${i + 1}/${audios.length})`);
-
-            const audioBuffer = await downloadAudioBuffer(audioInfo.url);
-            if (!audioBuffer) continue;
-
-            const audioOpus = await converterParaOpus(audioBuffer);
-
-            const messageOptions = {
-                audio: audioOpus || audioBuffer,
-                mimetype: audioOpus ? 'audio/ogg; codecs=opus' : 'audio/mpeg',
-                ptt: true
-            };
-
-            // Se tiver participante alvo, adiciona menção
-            if (targetParticipant) {
-                messageOptions.contextInfo = {
-                    mentionedJid: [targetParticipant]
-                };
-            }
-
-            if (audioOpus) {
-                try {
-                    await sock.sendMessage(jid, messageOptions, { quoted: posterMessage });
-                    console.log(`✅ Enviado (Opus): ${audioInfo.nome}`);
-                    continue;
-                } catch (err) {
-                    console.log(`⚠️ Opus falhou (${err.message}), tentando MP3...`);
-                }
-            }
-
-            const audioMp3Normalizado = await normalizarMp3(audioBuffer);
-            messageOptions.audio = audioMp3Normalizado || audioBuffer;
-            messageOptions.mimetype = 'audio/mpeg';
-            
-            await sock.sendMessage(jid, messageOptions, { quoted: posterMessage });
-            console.log(`✅ Enviado (MP3): ${audioInfo.nome}`);
-
-        } catch (error) {
-            console.error(`❌ Erro ao enviar áudio ${i + 1}:`, error.message);
-            if (CONFIG.DEBUG) console.error(error.stack);
-        }
-    }
-
-    console.log('✅ Envio de áudios concluído\n');
+    
+    console.error('❌ Falha ao baixar poster após todas as tentativas');
+    return null;
 }
 
 // ============================================
 // UTILITÁRIOS
 // ============================================
+
 async function deleteMessage(sock, groupId, messageKey) {
-    const delays = [0, 100, 500, 1000, 2000];
+    const delays = [0, 100, 500, 1000, 2000, 5000];
 
     for (let i = 0; i < delays.length; i++) {
         try {
@@ -373,20 +392,19 @@ async function deleteMessage(sock, groupId, messageKey) {
                 await new Promise(r => setTimeout(r, delays[i]));
             }
 
-            await sock.sendMessage(groupId, {
-                delete: {
-                    remoteJid: messageKey.remoteJid || groupId,
-                    fromMe: false,
-                    id: messageKey.id,
-                    participant: messageKey.participant
-                }
-            });
+            const key = {
+                remoteJid: messageKey.remoteJid || groupId,
+                fromMe: false,
+                id: messageKey.id,
+                participant: messageKey.participant
+            };
 
+            await sock.sendMessage(groupId, { delete: key });
             console.log(`✅ Mensagem deletada (tentativa ${i + 1})`);
             return true;
         } catch (error) {
             if (i === delays.length - 1) {
-                console.log(`⚠️ Não foi possível deletar mensagem: ${error.message}`);
+                console.log(`⚠️ Não foi possível deletar: ${error.message}`);
             }
         }
     }
@@ -405,6 +423,7 @@ function isValidParticipant(participant) {
 // ============================================
 // COMANDO: #atualizarregras
 // ============================================
+
 async function handleComandoAtualizarAudios(sock, message) {
     try {
         const from = message.key.remoteJid;
@@ -426,16 +445,16 @@ async function handleComandoAtualizarAudios(sock, message) {
                       `_Última atualização: ${new Date().toLocaleString('pt-BR')}_`
             }, { quoted: message });
             
-            console.log('✅ Comando #atualizarregras concluído com sucesso');
+            console.log('✅ Comando #atualizarregras concluído');
             return true;
         } else {
             await sock.sendMessage(from, {
                 text: '❌ *Erro ao atualizar áudios!*\n\n' +
-                      'Nenhum áudio foi encontrado no repositório.\n' +
+                      'Nenhum áudio do tipo "advertencia" foi encontrado no repositório.\n' +
                       'Verifique se o arquivo JSON está correto.'
             }, { quoted: message });
             
-            console.error('❌ Nenhum áudio encontrado após atualização');
+            console.error('❌ Nenhum áudio encontrado');
             return false;
         }
 
@@ -446,9 +465,7 @@ async function handleComandoAtualizarAudios(sock, message) {
             await sock.sendMessage(message.key.remoteJid, {
                 text: `❌ *Erro ao atualizar!*\n\n${error.message}`
             }, { quoted: message });
-        } catch (e) {
-            console.error('❌ Erro ao enviar mensagem de erro:', e.message);
-        }
+        } catch (e) {}
         
         return false;
     }
@@ -457,6 +474,7 @@ async function handleComandoAtualizarAudios(sock, message) {
 // ============================================
 // HANDLER PRINCIPAL
 // ============================================
+
 const alertaHandler = async (sock, message) => {
     try {
         const { key, message: msg } = message;
@@ -472,13 +490,15 @@ const alertaHandler = async (sock, message) => {
 
         const contentTrimmed = content.toLowerCase().trim();
 
-        console.log(`\n🔍 alertaHandler chamado | Conteúdo: "${contentTrimmed}"`);
+        console.log(`\n🔍 alertaHandler | Conteúdo: "${contentTrimmed}"`);
 
+        // Comando de atualização
         if (contentTrimmed === '#atualizarregras') {
             console.log('✅ Processando #atualizarregras');
             return await handleComandoAtualizarAudios(sock, message);
         }
 
+        // Verifica se é comando #alerta
         if (!content.includes('#alerta')) {
             console.log('⏭️ Não é comando #alerta, ignorando');
             return false;
@@ -486,6 +506,7 @@ const alertaHandler = async (sock, message) => {
 
         console.log('✅ Processando #alerta');
 
+        // Verifica se é grupo
         if (!from.includes('@g.us')) {
             await sock.sendMessage(from, {
                 text: '⚠️ *Este comando só funciona em grupos!*'
@@ -493,18 +514,19 @@ const alertaHandler = async (sock, message) => {
             return true;
         }
 
+        // Carrega áudios
         const audios = audiosCache.length > 0 ? audiosCache : await carregarAudios();
         
         if (!audios || audios.length === 0) {
             await sock.sendMessage(from, {
-                text: '❌ *Áudios não disponíveis no momento.*\n\n' +
-                      'Tente usar *#atualizarregras* primeiro ou aguarde alguns minutos.'
+                text: '❌ *Áudios não disponíveis.*\n\n' +
+                      'Tente usar *#atualizarregras* primeiro.'
             }, { quoted: message });
             return true;
         }
 
+        // Verifica se é admin
         const groupMetadata = await sock.groupMetadata(from);
-
         const isAdmin = groupMetadata.participants.some(
             p => p.id === sender && (p.admin === 'admin' || p.admin === 'superadmin')
         );
@@ -516,6 +538,7 @@ const alertaHandler = async (sock, message) => {
             return true;
         }
 
+        // Identifica alvo
         let targetMessageId = null;
         let targetParticipant = null;
 
@@ -528,8 +551,6 @@ const alertaHandler = async (sock, message) => {
             if (isValidParticipant(contextInfo.participant)) {
                 targetMessageId = contextInfo.stanzaId;
                 targetParticipant = contextInfo.participant;
-            } else {
-                console.log('⚠️ Participante inválido ignorado');
             }
         }
 
@@ -537,32 +558,34 @@ const alertaHandler = async (sock, message) => {
         // CASO 1: ALERTA GERAL (SEM RESPOSTA)
         // ============================================
         if (!targetMessageId || !targetParticipant) {
-            console.log('📢 Enviando ALERTA GERAL para o grupo');
+            console.log('📢 ALERTA GERAL para o grupo');
 
+            // Deleta comando
             await deleteMessage(sock, from, {
                 remoteJid: from,
                 id: key.id,
                 participant: sender
             });
 
-            // 🖼️ ENVIA APENAS O POSTER
+            // Baixa e envia poster (ou mensagem de texto se falhar)
             const posterBuffer = await downloadPoster();
+            let posterMessage;
             
-            if (!posterBuffer) {
-                await sock.sendMessage(from, {
-                    text: '❌ Erro ao carregar poster das regras'
+            if (posterBuffer) {
+                posterMessage = await sock.sendMessage(from, {
+                    image: posterBuffer,
+                    caption: '📢 *ATENÇÃO MEMBROS DO GRUPO*\n\n🎵 _Ouçam os áudios das regras abaixo_'
                 });
-                return true;
+                console.log('✅ Poster enviado');
+            } else {
+                // Fallback: mensagem de texto
+                posterMessage = await sock.sendMessage(from, {
+                    text: '📢 *ATENÇÃO MEMBROS DO GRUPO*\n\n🎵 _Ouçam os áudios das regras abaixo_'
+                });
+                console.log('✅ Mensagem de texto enviada (fallback)');
             }
 
-            const posterMessage = await sock.sendMessage(from, {
-                image: posterBuffer,
-                caption: '📢 *ATENÇÃO MEMBROS DO GRUPO*\n\n🎵 _Ouçam os áudios das regras abaixo_'
-            });
-
-            console.log('✅ Poster enviado');
-
-            // 🎵 ENVIA TODOS OS ÁUDIOS FAZENDO QUOTE DO POSTER
+            // Envia áudios
             await sendAudiosComQuoteDoPoster(sock, from, audios, posterMessage);
 
             return true;
@@ -598,27 +621,31 @@ const alertaHandler = async (sock, message) => {
             participant: sender
         });
 
-        // 🖼️ ENVIA APENAS O POSTER COM MENÇÃO
+        // Baixa e envia poster (ou mensagem de texto se falhar)
         const posterBuffer = await downloadPoster();
+        let posterMessage;
         
-        if (!posterBuffer) {
-            await sock.sendMessage(from, {
-                text: '❌ Erro ao carregar poster das regras'
+        if (posterBuffer) {
+            posterMessage = await sock.sendMessage(from, {
+                image: posterBuffer,
+                caption: `🚨 *@${targetName}*\n\n` +
+                         `⚠️ _Sua mensagem foi removida por conter conteúdo proibido._\n\n` +
+                         `🎵 _Ouça atentamente os áudios das regras abaixo_`,
+                mentions: [targetParticipant]
             });
-            return true;
+            console.log(`✅ Poster enviado para @${targetName}`);
+        } else {
+            // Fallback: mensagem de texto
+            posterMessage = await sock.sendMessage(from, {
+                text: `🚨 *@${targetName}*\n\n` +
+                      `⚠️ _Sua mensagem foi removida por conter conteúdo proibido._\n\n` +
+                      `🎵 _Ouça atentamente os áudios das regras abaixo_`,
+                mentions: [targetParticipant]
+            });
+            console.log(`✅ Mensagem de texto enviada para @${targetName} (fallback)`);
         }
 
-        const posterMessage = await sock.sendMessage(from, {
-            image: posterBuffer,
-            caption: `🚨 *@${targetName}*\n\n` +
-                     `⚠️ _Sua mensagem foi removida por conter conteúdo proibido._\n\n` +
-                     `🎵 _Ouça atentamente os áudios das regras abaixo_`,
-            mentions: [targetParticipant]
-        });
-
-        console.log(`✅ Poster enviado para @${targetName}`);
-
-        // 🎵 ENVIA TODOS OS ÁUDIOS FAZENDO QUOTE DO POSTER
+        // Envia áudios
         await sendAudiosComQuoteDoPoster(sock, from, audios, posterMessage, targetParticipant);
 
         return true;
@@ -633,16 +660,17 @@ const alertaHandler = async (sock, message) => {
 // ============================================
 // INICIALIZAÇÃO
 // ============================================
-console.log('🚀 Iniciando carregamento dos áudios de regras...');
+console.log('🚀 Inicializando alertaHandler...');
 carregarAudios().then(audios => {
     if (audios && audios.length > 0) {
-        console.log('✅ alertaHandler pronto para uso!');
-        console.log(`📊 Configuração: POSTER + ${audios.length} áudios`);
+        console.log('✅ alertaHandler pronto!');
+        console.log(`📊 ${audios.length} áudios carregados`);
     } else {
-        console.warn('⚠️ alertaHandler iniciado, mas nenhum áudio foi carregado');
+        console.warn('⚠️ Nenhum áudio carregado na inicialização');
+        console.warn('⚠️ Verifique o JSON e certifique-se que existem áudios com tipo: "advertencia"');
     }
 }).catch(error => {
-    console.error('❌ Erro ao inicializar alertaHandler:', error.message);
+    console.error('❌ Erro ao inicializar:', error.message);
 });
 
 // ============================================
