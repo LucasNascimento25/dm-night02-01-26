@@ -1,17 +1,251 @@
 import pool from '../../../db.js';
+import axios from 'axios';
+import ffmpeg from "fluent-ffmpeg";
+import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Configurar FFMPEG
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 // ============================================
-// IMPORTAÇÃO DO SISTEMA DE ALERTAS
+// CONFIGURAÇÃO
 // ============================================
-import { carregarAudios, sendAudiosSequencialComResposta } from './alertaHandler.js';
+const CONFIG = {
+    URL_POSTER: 'https://raw.githubusercontent.com/LucasNascimento25/audio-regras/main/poster-regras.jpg',
+    URL_AUDIOS_JSON: 'https://raw.githubusercontent.com/LucasNascimento25/audio-regras/main/audios-regras.json',
+    DOWNLOAD_TIMEOUT: 30000,
+    MAX_RETRIES: 3,
+    DELAY_ENTRE_AUDIOS: 2000 // 2 segundos entre cada áudio
+};
+
+// ============================================
+// FUNÇÕES DE CONVERSÃO DE ÁUDIO (COPIADAS DO CÓDIGO DE BOAS-VINDAS)
+// ============================================
+
+/**
+ * Converte áudio para Opus
+ */
+async function converterParaOpus(inputBuffer) {
+  return new Promise((resolve) => {
+    try {
+      const tempDir = path.join(__dirname, "../../../temp");
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+
+      const timestamp = Date.now();
+      const inputPath = path.join(tempDir, `input_${timestamp}.mp3`);
+      const outputPath = path.join(tempDir, `output_${timestamp}.ogg`);
+
+      fs.writeFileSync(inputPath, inputBuffer);
+
+      console.log("🔄 Convertendo para Opus...");
+
+      ffmpeg(inputPath)
+        .audioCodec('libopus')
+        .audioBitrate('48k')
+        .audioChannels(1)
+        .audioFrequency(48000)
+        .format('ogg')
+        .on('error', (err) => {
+          console.warn("⚠️ FFmpeg falhou:", err.message);
+          try {
+            if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+          } catch (e) {}
+          resolve(null);
+        })
+        .on('end', () => {
+          try {
+            if (!fs.existsSync(outputPath)) {
+              console.warn("⚠️ Arquivo de saída não foi criado");
+              fs.unlinkSync(inputPath);
+              resolve(null);
+              return;
+            }
+
+            const audioConvertido = fs.readFileSync(outputPath);
+            
+            try {
+              fs.unlinkSync(inputPath);
+              fs.unlinkSync(outputPath);
+            } catch (e) {}
+
+            console.log(`✅ Convertido para Opus: ${(audioConvertido.length / 1024).toFixed(2)} KB`);
+            resolve(audioConvertido);
+          } catch (error) {
+            console.error("❌ Erro ao ler arquivo convertido:", error.message);
+            resolve(null);
+          }
+        })
+        .save(outputPath);
+
+    } catch (error) {
+      console.error("❌ Erro na conversão:", error.message);
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * Envia áudio PTT com quote
+ */
+async function enviarAudioPTT(socket, groupId, audioUrl, quotedMessage) {
+  try {
+    console.log("\n========== ENVIANDO ÁUDIO PTT ==========");
+    console.log("📥 Baixando:", audioUrl);
+    
+    const response = await axios.get(audioUrl, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+      maxContentLength: 10 * 1024 * 1024,
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Accept': 'audio/*'
+      }
+    });
+    
+    const audioBuffer = Buffer.from(response.data);
+    
+    if (audioBuffer.length === 0) {
+      throw new Error("Buffer vazio");
+    }
+    
+    console.log(`✅ Baixado: ${(audioBuffer.length / 1024).toFixed(2)} KB`);
+
+    const sendOptions = {};
+    if (quotedMessage) {
+      sendOptions.quoted = quotedMessage;
+      console.log("✅ Usando quote na mensagem");
+    }
+
+    // Tenta converter para Opus primeiro
+    const audioOpus = await converterParaOpus(audioBuffer);
+
+    if (audioOpus) {
+      try {
+        await socket.sendMessage(groupId, {
+          audio: audioOpus,
+          mimetype: 'audio/ogg; codecs=opus',
+          ptt: true
+        }, sendOptions);
+
+        console.log("✅ Áudio PTT (Opus) enviado!");
+        console.log("====================================\n");
+        return true;
+      } catch (err) {
+        console.log(`⚠️ Opus falhou: ${err.message}`);
+      }
+    }
+
+    // Fallback MP3
+    try {
+      await socket.sendMessage(groupId, {
+        audio: audioBuffer,
+        mimetype: 'audio/mpeg',
+        ptt: true
+      }, sendOptions);
+
+      console.log("✅ Áudio PTT (MP3) enviado!");
+      console.log("====================================\n");
+      return true;
+    } catch (err) {
+      console.error(`❌ MP3 falhou: ${err.message}`);
+    }
+
+    return false;
+    
+  } catch (error) {
+    console.error("❌ Erro ao enviar áudio:", error.message);
+    return false;
+  }
+}
+
+// ============================================
+// CARREGAMENTO DE ÁUDIOS
+// ============================================
+
+async function carregarAudios() {
+  try {
+    console.log('🎵 Carregando áudios do JSON...');
+    
+    const response = await axios.get(CONFIG.URL_AUDIOS_JSON, {
+      timeout: 10000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!response.data || !response.data.audios) {
+      console.error('❌ JSON inválido ou sem campo "audios"');
+      return [];
+    }
+
+    const audiosAtivos = response.data.audios.filter(audio => audio.ativo === true);
+    
+    console.log(`✅ ${audiosAtivos.length} áudios ativos carregados`);
+    return audiosAtivos;
+    
+  } catch (error) {
+    console.error('❌ Erro ao carregar áudios:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Envia todos os áudios fazendo quote do poster
+ */
+async function sendAudiosComQuoteDoPoster(sock, groupId, audios, posterMessage, userId) {
+  if (!audios || audios.length === 0) {
+    console.log('⚠️ Nenhum áudio para enviar');
+    return;
+  }
+
+  console.log(`🎵 Iniciando envio de ${audios.length} áudios...`);
+
+  for (let i = 0; i < audios.length; i++) {
+    const audio = audios[i];
+    
+    try {
+      console.log(`\n📤 Enviando áudio ${i + 1}/${audios.length}: ${audio.nome}`);
+      
+      const sucesso = await enviarAudioPTT(
+        sock,
+        groupId,
+        audio.url,
+        posterMessage
+      );
+
+      if (sucesso) {
+        console.log(`✅ Áudio ${i + 1} enviado com sucesso`);
+      } else {
+        console.log(`⚠️ Falha ao enviar áudio ${i + 1}`);
+      }
+
+      // Aguarda entre áudios (exceto no último)
+      if (i < audios.length - 1) {
+        console.log(`⏳ Aguardando ${CONFIG.DELAY_ENTRE_AUDIOS}ms antes do próximo áudio...`);
+        await new Promise(resolve => setTimeout(resolve, CONFIG.DELAY_ENTRE_AUDIOS));
+      }
+      
+    } catch (error) {
+      console.error(`❌ Erro ao processar áudio ${i + 1}:`, error.message);
+    }
+  }
+
+  console.log('\n✅ Envio de áudios concluído!');
+}
 
 // ============================================
 // FUNÇÕES DE BANCO DE DADOS
 // ============================================
 
-/**
- * Obtém o número de advertências de um usuário em um grupo
- */
 async function getAdvertencias(userId, groupId) {
   const res = await pool.query(
     'SELECT count FROM advertencias WHERE user_id = $1 AND group_id = $2',
@@ -20,9 +254,6 @@ async function getAdvertencias(userId, groupId) {
   return res.rows[0]?.count || 0;
 }
 
-/**
- * Incrementa a advertência de um usuário
- */
 async function incrementAdvertencia(userId, groupId) {
   const count = await getAdvertencias(userId, groupId);
 
@@ -42,9 +273,6 @@ async function incrementAdvertencia(userId, groupId) {
   }
 }
 
-/**
- * Reseta as advertências de um usuário
- */
 async function resetAdvertencia(userId, groupId) {
   await pool.query(
     'DELETE FROM advertencias WHERE user_id = $1 AND group_id = $2',
@@ -56,9 +284,6 @@ async function resetAdvertencia(userId, groupId) {
 // FUNÇÕES AUXILIARES
 // ============================================
 
-/**
- * Deleta uma mensagem com múltiplas tentativas
- */
 const deleteCommandMessage = async (sock, groupId, messageKey) => {
   const delays = [0, 100, 500, 1000, 2000, 5000];
   
@@ -85,9 +310,6 @@ const deleteCommandMessage = async (sock, groupId, messageKey) => {
   return false;
 };
 
-/**
- * Envia mensagens com título padrão do grupo
- */
 async function sendMessage(sock, chatId, message, senderId) {
   const title = "👏🍻 DﾑMﾑS 💃🔥 Dﾑ NIGӇԵ💃🎶🍾🍸";
   const fullMessage = `${title}\n\n${message}`;
@@ -97,33 +319,83 @@ async function sendMessage(sock, chatId, message, senderId) {
   });
 }
 
-/**
- * Remove um usuário do grupo
- */
 async function banUser(sock, groupId, userId) {
   await sock.groupParticipantsUpdate(groupId, [userId], 'remove');
 }
 
-/**
- * Busca as regras do grupo na descrição
- */
-async function getGroupDescription(sock, groupId) {
-  try {
-    const metadata = await sock.groupMetadata(groupId);
-    return metadata.desc || '📜 *Regras não disponíveis na descrição do grupo*';
-  } catch (error) {
-    console.error('❌ Erro ao buscar descrição do grupo:', error.message);
-    return '📜 *Regras não disponíveis na descrição do grupo*';
-  }
+// ============================================
+// DOWNLOAD DO POSTER
+// ============================================
+
+function converterParaRawUrl(url) {
+    if (!url) return url;
+    
+    if (url.includes('raw.githubusercontent.com')) {
+        return url.replace('/refs/heads/', '/');
+    }
+    
+    if (url.includes('github.com')) {
+        return url
+            .replace('https://github.com/', 'https://raw.githubusercontent.com/')
+            .replace('/blob/', '/');
+    }
+    
+    return url;
+}
+
+async function downloadPoster() {
+    let tentativa = 0;
+    
+    while (tentativa < CONFIG.MAX_RETRIES) {
+        try {
+            tentativa++;
+            console.log(`🖼️ Tentando baixar poster (tentativa ${tentativa}/${CONFIG.MAX_RETRIES})...`);
+            
+            const urlCorrigida = converterParaRawUrl(CONFIG.URL_POSTER);
+            console.log(`📎 URL: ${urlCorrigida}`);
+            
+            const response = await axios.get(urlCorrigida, {
+                responseType: 'arraybuffer',
+                timeout: CONFIG.DOWNLOAD_TIMEOUT,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': 'image/jpeg, image/jpg, image/png, image/*',
+                    'Cache-Control': 'no-cache'
+                },
+                maxRedirects: 5,
+                validateStatus: (status) => status === 200
+            });
+
+            if (!response.data || response.data.byteLength === 0) {
+                throw new Error('Buffer vazio recebido');
+            }
+
+            console.log(`✅ Poster baixado: ${(response.data.byteLength / 1024).toFixed(2)} KB`);
+            return Buffer.from(response.data);
+
+        } catch (error) {
+            console.error(`❌ Erro na tentativa ${tentativa}:`, error.message);
+            
+            if (error.response?.status === 404) {
+                console.error('⚠️ ARQUIVO NÃO ENCONTRADO (404)');
+                break;
+            }
+            
+            if (tentativa < CONFIG.MAX_RETRIES) {
+                console.log(`⏳ Aguardando 2s antes da próxima tentativa...`);
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        }
+    }
+    
+    console.error('❌ Falha ao baixar poster após todas as tentativas');
+    return null;
 }
 
 // ============================================
 // LÓGICA PRINCIPAL DE ADVERTÊNCIAS
 // ============================================
 
-/**
- * Processa a advertência do usuário
- */
 async function tratarAdvertencia(sock, groupId, userId) {
   let groupMetadata;
   
@@ -149,7 +421,9 @@ async function tratarAdvertencia(sock, groupId, userId) {
   const count = await incrementAdvertencia(userId, groupId);
   console.log(`Incrementando advertência para ${userId} no grupo ${groupId}. Total: ${count}/3`);
 
-  // Usuário atingiu 3 advertências - banir
+  // ============================================
+  // USUÁRIO ATINGIU 3 ADVERTÊNCIAS - BANIR
+  // ============================================
   if (count >= 3) {
     await banUser(sock, groupId, userId);
     await sendMessage(
@@ -164,69 +438,68 @@ Mesmo após as advertências anteriores, continuou infringindo as regras estabel
     );
     await resetAdvertencia(userId, groupId);
   } 
-  // Usuário recebeu advertência
+  // ============================================
+  // USUÁRIO RECEBEU ADVERTÊNCIA (1 ou 2)
+  // ============================================
   else {
-    // PRIMEIRA MENSAGEM: Aviso de advertência
-    await sendMessage(
-      sock,
-      groupId,
-      `@${userId.split('@')[0]}, 𝗩𝗢𝗖𝗘 𝗜𝗡𝗙𝗥𝗜𝗡𝗚𝗜𝗨 𝗨𝗠𝗔 𝗗𝗔𝗦 𝗥𝗘𝗚𝗥𝗔𝗦 𝗗𝗢 𝗚𝗥𝗨𝗣𝗢 𝗘 𝗥𝗘𝗖𝗘𝗕𝗘𝗨 𝗦𝗨𝗔 𝗔𝗗𝗩𝗘𝗥𝗧𝗘𝗡𝗖𝗜𝗔.
- ${count}/3 ⚠️
-
-⚠️ 𝗔𝗢 𝗔𝗧𝗜𝗡𝗚𝗜𝗥 𝟯 𝗔𝗗𝗩𝗘𝗥𝗧𝗘𝗡𝗖𝗜𝗔𝗦, 𝗩𝗢𝗖𝗘̂ 𝗦𝗘𝗥𝗔 𝗥𝗘𝗠𝗢𝗩𝗜𝗗𝗢 𝗔𝗨𝗧𝗢𝗠𝗔𝗧𝗜𝗖𝗔𝗠𝗘𝗡𝗧𝗘 𝗗𝗢 𝗚𝗥𝗨𝗣𝗢
-🚫👋
-
-📋 Leia as regras do grupo abaixo para evitar futuras penalizações.`,
-      userId
-    );
-
-    // SEGUNDA MENSAGEM: Regras do grupo (imediatamente)
-    try {
-      const regras = await getGroupDescription(sock, groupId);
-      
-      const regrasMessage = await sock.sendMessage(groupId, {
-        text: `『🕺🍻 𝐑𝐄𝐆𝐑♞𝐒 ҉ 𝐃♛ ҉ 𝐆𝐑𝐔𝐏♛ 💃🍷』 \n\n
-@${userId.split('@')[0]}, por favor leia atentamente as regras abaixo:
-
-
-${regras}`,
+    console.log(`📢 Processando advertência ${count}/3 para @${userId.split('@')[0]}`);
+    
+    // 🖼️ TENTA BAIXAR E ENVIAR O POSTER
+    const posterBuffer = await downloadPoster();
+    let posterMessage = null;
+    
+    if (posterBuffer) {
+      try {
+        posterMessage = await sock.sendMessage(groupId, {
+          image: posterBuffer,
+          caption: `🚨 *@${userId.split('@')[0]}* - ADVERTÊNCIA ${count}/3 ⚠️\n\n` +
+                   `𝗩𝗢𝗖𝗘 𝗜𝗡𝗙𝗥𝗜𝗡𝗚𝗜𝗨 𝗨𝗠𝗔 𝗗𝗔𝗦 𝗥𝗘𝗚𝗥𝗔𝗦 𝗗𝗢 𝗚𝗥𝗨𝗣𝗢\n\n` +
+                   `⚠️ 𝗔𝗢 𝗔𝗧𝗜𝗡𝗚𝗜𝗥 𝟯 𝗔𝗗𝗩𝗘𝗥𝗧𝗘𝗡𝗖𝗜𝗔𝗦, 𝗩𝗢𝗖𝗘̂ 𝗦𝗘𝗥𝗔 𝗥𝗘𝗠𝗢𝗩𝗜𝗗𝗢\n\n` +
+                   `🎵 _Ouça atentamente os áudios das regras abaixo_`,
+          mentions: [userId]
+        });
+        console.log(`✅ Poster da advertência enviado`);
+      } catch (error) {
+        console.error('❌ Erro ao enviar poster:', error.message);
+        posterMessage = null;
+      }
+    }
+    
+    // 📝 FALLBACK: Se não conseguiu enviar poster, envia mensagem de texto
+    if (!posterMessage) {
+      console.log('📝 Enviando mensagem de texto como fallback');
+      posterMessage = await sock.sendMessage(groupId, {
+        text: `🚨 *@${userId.split('@')[0]}* - 𝗔𝗗𝗩𝗘𝗥𝗧𝗘𝗡𝗖𝗜𝗔 ${count}/3 ⚠️\n\n` +
+              `𝗩𝗢𝗖𝗘 𝗜𝗡𝗙𝗥𝗜𝗡𝗚𝗜𝗨 𝗨𝗠𝗔 𝗗𝗔𝗦 𝗥𝗘𝗚𝗥𝗔𝗦 𝗗𝗢 𝗚𝗥𝗨𝗣𝗢\n\n` +
+              `⚠️ 𝗔𝗢 𝗔𝗧𝗜𝗡𝗚𝗜𝗥 𝟯 𝗔𝗗𝗩𝗘𝗥𝗧𝗘𝗡𝗖𝗜𝗔𝗦, 𝗩𝗢𝗖𝗘̂ 𝗦𝗘𝗥𝗔 𝗥𝗘𝗠𝗢𝗩𝗜𝗗𝗢\n\n` +
+              `🔊 _Ouça atentamente os áudios das regras abaixo para evitar futuras advertências._`,
         mentions: [userId]
       });
+    }
 
-      console.log(`✅ Regras enviadas para @${userId.split('@')[0]}`);
-
-      // TERCEIRA PARTE: Enviar TODOS os 4 áudios imediatamente
-      try {
-        console.log('🎵 Carregando áudios do sistema de alertas...');
-        const audios = await carregarAudios();
+    // 🎵 ENVIA TODOS OS ÁUDIOS FAZENDO QUOTE DO POSTER/MENSAGEM
+    try {
+      console.log('🎵 Carregando e enviando áudios...');
+      const audios = await carregarAudios();
+      
+      if (audios && audios.length > 0) {
+        console.log(`🎵 Enviando ${audios.length} áudios para @${userId.split('@')[0]}`);
         
-        console.log(`📊 Áudios carregados: ${audios?.length || 0}`);
+        await sendAudiosComQuoteDoPoster(
+          sock, 
+          groupId, 
+          audios, 
+          posterMessage,
+          userId
+        );
         
-        if (audios && audios.length > 0) {
-          console.log(`🎵 Enviando ${audios.length} áudios para @${userId.split('@')[0]}`);
-          
-          // ⚡ ENVIAR TODOS OS ÁUDIOS DISPONÍVEIS
-          await sendAudiosSequencialComResposta(
-            sock, 
-            groupId, 
-            audios, 
-            0,  // Começa do primeiro áudio (índice 0)
-            audios.length,  // Envia TODOS os áudios disponíveis
-            regrasMessage,  // Responde a mensagem das regras
-            userId  // Menciona o usuário infrator
-          );
-          
-          console.log('✅ Áudios enviados com sucesso');
-        } else {
-          console.warn('⚠️ Nenhum áudio disponível para envio');
-        }
-      } catch (error) {
-        console.error('❌ Erro ao enviar áudios:', error);
-        console.error(error.stack);
+        console.log('✅ Todos os áudios foram enviados');
+      } else {
+        console.warn('⚠️ Nenhum áudio disponível no JSON');
       }
-
     } catch (error) {
-      console.error('❌ Erro ao enviar regras:', error);
+      console.error('❌ Erro ao enviar áudios:', error.message);
+      console.error(error.stack);
     }
   }
 }
@@ -235,9 +508,6 @@ ${regras}`,
 // HANDLER PRINCIPAL
 // ============================================
 
-/**
- * Processa mensagens do grupo para detectar comandos #adv
- */
 async function handleMessage(sock, message) {
   try {
     const { key, message: msg } = message;
@@ -245,7 +515,7 @@ async function handleMessage(sock, message) {
     const sender = key.participant || key.remoteJid;
     const botId = sock.user.id;
 
-    console.log(`Mensagem recebida de ${sender} no grupo ${from}:`, msg);
+    console.log(`Mensagem recebida de ${sender} no grupo ${from}`);
 
     // ============================================
     // VERIFICAÇÃO DE COMANDO #adv
@@ -253,18 +523,18 @@ async function handleMessage(sock, message) {
     
     let isAdvCommand = false;
 
-    // 1. Verificar imagem com caption #adv
+    // Caso 1: #adv em legenda de imagem
     if (msg?.imageMessage?.caption?.includes('#adv')) {
       isAdvCommand = true;
     }
 
-    // 2. Verificar resposta/quote com #adv
+    // Caso 2: #adv em resposta/quote
     if (msg?.extendedTextMessage?.text?.includes('#adv') && 
         msg?.extendedTextMessage?.contextInfo?.participant) {
       isAdvCommand = true;
     }
 
-    // 3. Verificar menção direta com #adv
+    // Caso 3: #adv em mensagem normal
     const messageContent = msg?.conversation || msg?.extendedTextMessage?.text;
     if (messageContent) {
       if (/^#adv\s+@/.test(messageContent) || /^@[^\s]+\s+#adv/.test(messageContent)) {
@@ -272,10 +542,11 @@ async function handleMessage(sock, message) {
       }
     }
 
-    // Se não for comando #adv, ignorar
     if (!isAdvCommand) {
       return;
     }
+
+    console.log('🚨 Comando #adv detectado!');
 
     // ============================================
     // VERIFICAÇÃO DE PERMISSÃO (ADMIN)
@@ -294,6 +565,7 @@ async function handleMessage(sock, message) {
     }
 
     if (!isAdmin) {
+      console.log(`⛔ Usuário ${sender} não é admin`);
       await sendMessage(
         sock,
         from,
@@ -304,7 +576,9 @@ Este recurso é exclusivo dos administradores do grupo.`,
       return;
     }
 
-    // Deletar mensagem do comando
+    console.log('✅ Usuário é admin, processando comando...');
+
+    // Deleta a mensagem de comando
     await deleteCommandMessage(sock, from, key);
 
     // ============================================
@@ -322,6 +596,7 @@ Este recurso é exclusivo dos administradores do grupo.`,
           key.remoteJid;
 
         if (imageSender && imageSender !== botId) {
+          console.log(`📸 Advertência em imagem para ${imageSender}`);
           await tratarAdvertencia(sock, from, imageSender);
         }
         return;
@@ -338,7 +613,8 @@ Este recurso é exclusivo dos administradores do grupo.`,
           const originalSender = quotedMessage.participant;
 
           if (originalSender && originalSender !== botId) {
-            // Deletar mensagem original
+            console.log(`💬 Advertência em quote para ${originalSender}`);
+            
             const originalMessageKey = {
               remoteJid: from,
               fromMe: false,
@@ -356,7 +632,7 @@ Este recurso é exclusivo dos administradores do grupo.`,
 
     // Caso 3: #adv com menção direta
     if (messageContent) {
-      // Padrão: #adv @nome
+      // Padrão 1: #adv @usuario
       const pattern1 = /^#adv\s+@([^\s]+)/;
       const match1 = messageContent.match(pattern1);
       
@@ -367,12 +643,15 @@ Este recurso é exclusivo dos administradores do grupo.`,
         );
 
         if (userToWarn && userToWarn.id !== botId) {
+          console.log(`👤 Advertência por menção (padrão 1) para ${userToWarn.id}`);
           await tratarAdvertencia(sock, from, userToWarn.id);
+        } else {
+          console.log('⚠️ Usuário mencionado não encontrado');
         }
         return;
       }
 
-      // Padrão: @nome #adv
+      // Padrão 2: @usuario #adv
       const pattern2 = /^@([^\s]+)\s+#adv/;
       const match2 = messageContent.match(pattern2);
       
@@ -383,14 +662,20 @@ Este recurso é exclusivo dos administradores do grupo.`,
         );
 
         if (userToWarn && userToWarn.id !== botId) {
+          console.log(`👤 Advertência por menção (padrão 2) para ${userToWarn.id}`);
           await tratarAdvertencia(sock, from, userToWarn.id);
+        } else {
+          console.log('⚠️ Usuário mencionado não encontrado');
         }
         return;
       }
     }
 
+    console.log('⚠️ Comando #adv não correspondeu a nenhum padrão esperado');
+
   } catch (error) {
-    console.error('Erro ao processar mensagem de advertência:', error);
+    console.error('❌ Erro ao processar mensagem de advertência:', error);
+    console.error(error.stack);
   }
 }
 
@@ -401,5 +686,5 @@ Este recurso é exclusivo dos administradores do grupo.`,
 export { 
   handleMessage,
   carregarAudios,
-  sendAudiosSequencialComResposta
+  sendAudiosComQuoteDoPoster
 };

@@ -1,6 +1,5 @@
-// alertaHandler.js - Sistema de Moderação Completo
-// Versão otimizada com envio imediato de áudios
-// CORRIGIDO - URL DO GITHUB AJUSTADA
+// alertaHandler.js - Sistema de Moderação Simplificado
+// VERSÃO: APENAS POSTER + ÁUDIOS (sem mensagens de texto)
 
 import axios from 'axios';
 import fs from 'fs';
@@ -20,20 +19,49 @@ console.log('✅ alertaHandler.js CARREGADO!');
 // CONFIGURAÇÕES
 // ============================================
 const CONFIG = {
-    // URL CORRETA COM /refs/heads/
-    URL_AUDIOS: 'https://raw.githubusercontent.com/LucasNascimento25/audio-regras/refs/heads/main/audios-regras.json',
-    AUDIO_INTERVAL: 0, // ⚡ SEM INTERVALO - ENVIO IMEDIATO
+    URL_AUDIOS: 'https://raw.githubusercontent.com/LucasNascimento25/audio-regras/main/audios-regras.json',
+    // 🖼️ URL DO POSTER DAS REGRAS
+    URL_POSTER: 'https://raw.githubusercontent.com/LucasNascimento25/audio-regras/main/poster-regras.jpg',
+    AUDIO_INTERVAL: 0,
     MAX_RETRIES: 3,
     DOWNLOAD_TIMEOUT: 30000,
     DEBUG: process.env.DEBUG === 'true',
-    // 🎵 Configuração de áudios
-    AUDIOS_GRUPO: 4,      // TODOS os 4 áudios para grupo geral
-    AUDIOS_INDIVIDUAL: 4  // TODOS os 4 áudios para advertência individual
+    AUDIOS_GRUPO: 4,
+    AUDIOS_INDIVIDUAL: 4
 };
 
-// Cache de áudios em memória
 let audiosCache = [];
 let ultimaAtualizacao = null;
+
+// ============================================
+// FUNÇÃO CORRIGIDA DE CONVERSÃO DE URL
+// ============================================
+function converterParaRawUrl(url) {
+    if (!url) return url;
+    
+    console.log(`🔧 URL original: ${url}`);
+    
+    // Remove /refs/heads/ se existir (isso estava causando o erro!)
+    url = url.replace('/refs/heads/', '/');
+    
+    // Se já está no formato raw correto, retorna
+    if (url.includes('raw.githubusercontent.com')) {
+        console.log(`✅ URL raw correta: ${url}`);
+        return url;
+    }
+    
+    // Converte URL do GitHub normal para raw
+    if (url.includes('github.com')) {
+        const novaUrl = url
+            .replace('https://github.com/', 'https://raw.githubusercontent.com/')
+            .replace('/blob/', '/');
+        console.log(`🔄 Convertido para raw: ${novaUrl}`);
+        return novaUrl;
+    }
+    
+    console.log(`⚠️ URL mantida sem conversão: ${url}`);
+    return url;
+}
 
 // ============================================
 // GERENCIAMENTO DE ÁUDIOS
@@ -58,7 +86,6 @@ async function carregarAudios(forceRefresh = false) {
 
         const data = await response.json();
         
-        // Filtra apenas áudios ativos com comando "regras"
         const audiosAtivos = (data.audios || []).filter(a => 
             a.ativo === true && a.comando === 'regras'
         );
@@ -68,21 +95,22 @@ async function carregarAudios(forceRefresh = false) {
             return [];
         }
 
-        // Corrige URLs dos áudios (adiciona /refs/heads/ se necessário)
-        const audiosCorrigidos = audiosAtivos.map(audio => ({
-            ...audio,
-            url: audio.url.includes('/refs/heads/')
-                ? audio.url
-                : audio.url.replace('/raw/main/', '/refs/heads/main/')
-        }));
+        const audiosCorrigidos = audiosAtivos.map(audio => {
+            const urlCorrigida = converterParaRawUrl(audio.url);
+            return {
+                ...audio,
+                url: urlCorrigida
+            };
+        });
 
         audiosCache = audiosCorrigidos;
         ultimaAtualizacao = new Date();
         
         console.log(`✅ [Regras] ${audiosCache.length} áudios carregados com sucesso!`);
-        console.log('📋 Primeiros áudios:');
-        audiosCache.slice(0, 3).forEach((a, i) => {
+        console.log('📋 URLs corrigidas:');
+        audiosCache.forEach((a, i) => {
             console.log(`  ${i + 1}. ${a.nome}`);
+            console.log(`     ${a.url}`);
         });
         
         return audiosCache;
@@ -92,27 +120,6 @@ async function carregarAudios(forceRefresh = false) {
         if (CONFIG.DEBUG) console.error(error.stack);
         return [];
     }
-}
-
-function converterParaRawUrl(url) {
-    if (!url) return url;
-    
-    // Se já tem refs/heads, retorna direto
-    if (url.includes('/refs/heads/')) return url;
-    
-    // Converte /raw/main/ para /refs/heads/main/
-    if (url.includes('/raw/main/')) {
-        return url.replace('/raw/main/', '/refs/heads/main/');
-    }
-    
-    // Converte github.com/blob para raw.githubusercontent.com
-    if (url.includes('github.com') && url.includes('/blob/')) {
-        return url
-            .replace('github.com', 'raw.githubusercontent.com')
-            .replace('/blob/', '/refs/heads/');
-    }
-    
-    return url;
 }
 
 async function downloadAudioBuffer(url) {
@@ -128,11 +135,10 @@ async function downloadAudioBuffer(url) {
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
 
-            const rawUrl = converterParaRawUrl(url);
             console.log(`📥 Baixando áudio (tentativa ${attempt + 1}/${CONFIG.MAX_RETRIES})...`);
-            if (CONFIG.DEBUG) console.log(`🔗 URL: ${rawUrl}`);
+            console.log(`🔗 URL: ${url}`);
 
-            const response = await axios.get(rawUrl, {
+            const response = await axios.get(url, {
                 responseType: 'arraybuffer',
                 timeout: CONFIG.DOWNLOAD_TIMEOUT,
                 headers: {
@@ -161,6 +167,40 @@ async function downloadAudioBuffer(url) {
                 throw new Error(`Falha após ${CONFIG.MAX_RETRIES} tentativas: ${errorMsg}`);
             }
         }
+    }
+}
+
+// ============================================
+// DOWNLOAD DO POSTER
+// ============================================
+async function downloadPoster() {
+    try {
+        console.log('🖼️ Baixando poster das regras...');
+        
+        const urlCorrigida = converterParaRawUrl(CONFIG.URL_POSTER);
+        
+        const response = await axios.get(urlCorrigida, {
+            responseType: 'arraybuffer',
+            timeout: CONFIG.DOWNLOAD_TIMEOUT,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; WhatsAppBot/1.0)',
+                'Accept': 'image/jpeg, image/jpg, image/png, image/*',
+                'Cache-Control': 'no-cache'
+            },
+            maxRedirects: 5
+        });
+
+        if (!response.data || response.data.byteLength === 0) {
+            throw new Error('Buffer vazio recebido');
+        }
+
+        console.log(`✅ Poster baixado: ${(response.data.byteLength / 1024).toFixed(2)} KB`);
+        return Buffer.from(response.data);
+
+    } catch (error) {
+        console.error('❌ Erro ao baixar poster:', error.message);
+        if (CONFIG.DEBUG) console.error(error.stack);
+        return null;
     }
 }
 
@@ -256,128 +296,49 @@ async function normalizarMp3(inputBuffer) {
 }
 
 // ============================================
-// ENVIO DE ÁUDIOS
+// ENVIO DE ÁUDIOS COM QUOTE DO POSTER
 // ============================================
-async function sendAudioByIndex(sock, jid, audios, index, quotedMessage = null) {
-    try {
-        if (!audios || audios.length === 0) {
-            console.error('❌ Array de áudios vazio');
-            return false;
-        }
-
-        if (index < 0 || index >= audios.length) {
-            console.error(`❌ Índice inválido: ${index} (total: ${audios.length})`);
-            return false;
-        }
-
-        const audioInfo = audios[index];
-        
-        if (!audioInfo || !audioInfo.url) {
-            console.error(`❌ Áudio ${index + 1} não tem URL válida`);
-            return false;
-        }
-
-        console.log(`\n🎵 Enviando: ${audioInfo.nome} (${index + 1}/${audios.length})`);
-
-        const audioBuffer = await downloadAudioBuffer(audioInfo.url);
-        if (!audioBuffer) return false;
-
-        const sendOptions = quotedMessage ? { quoted: quotedMessage } : {};
-
-        const audioOpus = await converterParaOpus(audioBuffer);
-
-        if (audioOpus) {
-            try {
-                await sock.sendMessage(jid, {
-                    audio: audioOpus,
-                    mimetype: 'audio/ogg; codecs=opus',
-                    ptt: true
-                }, sendOptions);
-                
-                console.log(`✅ Enviado (Opus): ${audioInfo.nome}`);
-                return true;
-            } catch (err) {
-                console.log(`⚠️ Opus falhou (${err.message}), tentando MP3...`);
-            }
-        }
-
-        const audioMp3Normalizado = await normalizarMp3(audioBuffer);
-        
-        await sock.sendMessage(jid, {
-            audio: audioMp3Normalizado || audioBuffer,
-            mimetype: 'audio/mpeg',
-            ptt: true
-        }, sendOptions);
-
-        console.log(`✅ Enviado (MP3): ${audioInfo.nome}`);
-        return true;
-
-    } catch (error) {
-        console.error(`❌ Erro ao enviar áudio ${index + 1}:`, error.message);
-        if (CONFIG.DEBUG) console.error(error.stack);
-        return false;
-    }
-}
-
-async function sendAudiosSequencial(sock, jid, audios, startIndex, count, quotedMessage = null) {
+async function sendAudiosComQuoteDoPoster(sock, jid, audios, posterMessage, targetParticipant = null) {
     if (!audios || audios.length === 0) {
         console.error('❌ Nenhum áudio disponível para envio');
         return;
     }
 
-    const endIndex = Math.min(startIndex + count, audios.length);
-    const actualCount = endIndex - startIndex;
+    console.log(`\n🎵 Enviando ${audios.length} áudios IMEDIATAMENTE (com quote do poster)`);
 
-    console.log(`\n🎵 Enviando ${actualCount} áudios IMEDIATAMENTE (${startIndex + 1} a ${endIndex})`);
-
-    for (let i = 0; i < actualCount; i++) {
-        // ⚡ SEM DELAY - ENVIO IMEDIATO
-        await sendAudioByIndex(sock, jid, audios, startIndex + i, quotedMessage);
-    }
-
-    console.log('✅ Envio sequencial concluído\n');
-}
-
-async function sendAudiosSequencialComResposta(sock, jid, audios, startIndex, count, quotedMessage, targetParticipant) {
-    if (!audios || audios.length === 0) {
-        console.error('❌ Nenhum áudio disponível para envio');
-        return;
-    }
-
-    const endIndex = Math.min(startIndex + count, audios.length);
-    const actualCount = endIndex - startIndex;
-
-    console.log(`\n🎵 Enviando ${actualCount} áudios IMEDIATAMENTE respondendo mensagem (${startIndex + 1} a ${endIndex})`);
-
-    for (let i = 0; i < actualCount; i++) {
-        // ⚡ SEM DELAY - ENVIO IMEDIATO
+    for (let i = 0; i < audios.length; i++) {
         try {
-            const audioInfo = audios[startIndex + i];
+            const audioInfo = audios[i];
             
             if (!audioInfo || !audioInfo.url) {
-                console.error(`❌ Áudio ${startIndex + i + 1} não tem URL válida`);
+                console.error(`❌ Áudio ${i + 1} não tem URL válida`);
                 continue;
             }
 
-            console.log(`\n🎵 Enviando: ${audioInfo.nome} (${startIndex + i + 1}/${audios.length})`);
+            console.log(`\n🎵 Enviando: ${audioInfo.nome} (${i + 1}/${audios.length})`);
 
             const audioBuffer = await downloadAudioBuffer(audioInfo.url);
             if (!audioBuffer) continue;
 
             const audioOpus = await converterParaOpus(audioBuffer);
 
+            const messageOptions = {
+                audio: audioOpus || audioBuffer,
+                mimetype: audioOpus ? 'audio/ogg; codecs=opus' : 'audio/mpeg',
+                ptt: true
+            };
+
+            // Se tiver participante alvo, adiciona menção
+            if (targetParticipant) {
+                messageOptions.contextInfo = {
+                    mentionedJid: [targetParticipant]
+                };
+            }
+
             if (audioOpus) {
                 try {
-                    await sock.sendMessage(jid, {
-                        audio: audioOpus,
-                        mimetype: 'audio/ogg; codecs=opus',
-                        ptt: true,
-                        contextInfo: {
-                            mentionedJid: [targetParticipant]
-                        }
-                    }, { quoted: quotedMessage });
-                    
-                    console.log(`✅ Enviado (Opus) com menção: ${audioInfo.nome}`);
+                    await sock.sendMessage(jid, messageOptions, { quoted: posterMessage });
+                    console.log(`✅ Enviado (Opus): ${audioInfo.nome}`);
                     continue;
                 } catch (err) {
                     console.log(`⚠️ Opus falhou (${err.message}), tentando MP3...`);
@@ -385,25 +346,19 @@ async function sendAudiosSequencialComResposta(sock, jid, audios, startIndex, co
             }
 
             const audioMp3Normalizado = await normalizarMp3(audioBuffer);
+            messageOptions.audio = audioMp3Normalizado || audioBuffer;
+            messageOptions.mimetype = 'audio/mpeg';
             
-            await sock.sendMessage(jid, {
-                audio: audioMp3Normalizado || audioBuffer,
-                mimetype: 'audio/mpeg',
-                ptt: true,
-                contextInfo: {
-                    mentionedJid: [targetParticipant]
-                }
-            }, { quoted: quotedMessage });
-
-            console.log(`✅ Enviado (MP3) com menção: ${audioInfo.nome}`);
+            await sock.sendMessage(jid, messageOptions, { quoted: posterMessage });
+            console.log(`✅ Enviado (MP3): ${audioInfo.nome}`);
 
         } catch (error) {
-            console.error(`❌ Erro ao enviar áudio ${startIndex + i + 1}:`, error.message);
+            console.error(`❌ Erro ao enviar áudio ${i + 1}:`, error.message);
             if (CONFIG.DEBUG) console.error(error.stack);
         }
     }
 
-    console.log('✅ Envio sequencial com resposta concluído\n');
+    console.log('✅ Envio de áudios concluído\n');
 }
 
 // ============================================
@@ -436,16 +391,6 @@ async function deleteMessage(sock, groupId, messageKey) {
         }
     }
     return false;
-}
-
-async function getGroupDescription(sock, groupId) {
-    try {
-        const metadata = await sock.groupMetadata(groupId);
-        return metadata.desc || null;
-    } catch (error) {
-        console.error('❌ Erro ao buscar descrição do grupo:', error.message);
-        return null;
-    }
 }
 
 function isValidParticipant(participant) {
@@ -558,16 +503,6 @@ const alertaHandler = async (sock, message) => {
             return true;
         }
 
-        // ⚠️ VALIDAÇÃO: Verificar se temos áudios suficientes
-        if (audios.length < 4) {
-            await sock.sendMessage(from, {
-                text: `⚠️ *Áudios insuficientes!*\n\n` +
-                      `Temos apenas ${audios.length} áudio(s).\n` +
-                      `Mínimo necessário: 4 áudios`
-            }, { quoted: message });
-            return true;
-        }
-
         const groupMetadata = await sock.groupMetadata(from);
 
         const isAdmin = groupMetadata.participants.some(
@@ -598,8 +533,11 @@ const alertaHandler = async (sock, message) => {
             }
         }
 
+        // ============================================
+        // CASO 1: ALERTA GERAL (SEM RESPOSTA)
+        // ============================================
         if (!targetMessageId || !targetParticipant) {
-            console.log('📢 Enviando regras GERAIS para o grupo');
+            console.log('📢 Enviando ALERTA GERAL para o grupo');
 
             await deleteMessage(sock, from, {
                 remoteJid: from,
@@ -607,26 +545,32 @@ const alertaHandler = async (sock, message) => {
                 participant: sender
             });
 
-            const descricao = await getGroupDescription(sock, from);
-            const regras = descricao || '📜 *Regras não disponíveis na descrição do grupo*';
+            // 🖼️ ENVIA APENAS O POSTER
+            const posterBuffer = await downloadPoster();
+            
+            if (!posterBuffer) {
+                await sock.sendMessage(from, {
+                    text: '❌ Erro ao carregar poster das regras'
+                });
+                return true;
+            }
 
-            const mentions = groupMetadata.participants
-                .filter(p => isValidParticipant(p.id))
-                .map(p => p.id);
-
-            await sock.sendMessage(from, {
-                text: `📢 *ATENÇÃO MEMBROS DO GRUPO*\n\n${regras}`,
-                mentions
+            const posterMessage = await sock.sendMessage(from, {
+                image: posterBuffer,
+                caption: '📢 *ATENÇÃO MEMBROS DO GRUPO*\n\n🎵 _Ouçam os áudios das regras abaixo_'
             });
 
-            console.log(`✅ Regras enviadas (${mentions.length} menções)`);
+            console.log('✅ Poster enviado');
 
-            // 🎵 Enviar TODOS os 4 áudios para grupo geral
-            await sendAudiosSequencial(sock, from, audios, 0, audios.length);
+            // 🎵 ENVIA TODOS OS ÁUDIOS FAZENDO QUOTE DO POSTER
+            await sendAudiosComQuoteDoPoster(sock, from, audios, posterMessage);
 
             return true;
         }
 
+        // ============================================
+        // CASO 2: ADVERTÊNCIA INDIVIDUAL (COM RESPOSTA)
+        // ============================================
         console.log('🎯 ADVERTÊNCIA INDIVIDUAL');
 
         let targetName = targetParticipant.split('@')[0];
@@ -636,6 +580,7 @@ const alertaHandler = async (sock, message) => {
             targetName = participant.notify || participant.verifiedName || participant.name || targetName;
         }
 
+        // Deleta mensagem do infrator
         const deleted = await deleteMessage(sock, from, {
             remoteJid: from,
             id: targetMessageId,
@@ -646,39 +591,35 @@ const alertaHandler = async (sock, message) => {
             await new Promise(resolve => setTimeout(resolve, 500));
         }
 
+        // Deleta comando do admin
         await deleteMessage(sock, from, {
             remoteJid: from,
             id: key.id,
             participant: sender
         });
 
-        // PRIMEIRA MENSAGEM - Aviso imediato
-        await sock.sendMessage(from, {
-            text: `🚨 *MENSAGEM REMOVIDA*\n\n` +
-                  `⚠️ @${targetName}, sua mensagem foi apagada por conter *CONTEÚDO PROIBIDO*.\n\n` +
-                  `📋 Leia atentamente as regras do grupo abaixo.`,
+        // 🖼️ ENVIA APENAS O POSTER COM MENÇÃO
+        const posterBuffer = await downloadPoster();
+        
+        if (!posterBuffer) {
+            await sock.sendMessage(from, {
+                text: '❌ Erro ao carregar poster das regras'
+            });
+            return true;
+        }
+
+        const posterMessage = await sock.sendMessage(from, {
+            image: posterBuffer,
+            caption: `🚨 *@${targetName}*\n\n` +
+                     `⚠️ _Sua mensagem foi removida por conter conteúdo proibido._\n\n` +
+                     `🎵 _Ouça atentamente os áudios das regras abaixo_`,
             mentions: [targetParticipant]
         });
 
-        console.log(`✅ Aviso enviado para @${targetName}`);
+        console.log(`✅ Poster enviado para @${targetName}`);
 
-        // SEGUNDA MENSAGEM - Regras completas (IMEDIATO)
-        const descricao = await getGroupDescription(sock, from);
-        const regras = descricao || '📜 *Regras não disponíveis na descrição do grupo*';
-
-        const regrasMessage = await sock.sendMessage(from, {
-            text: `📖 *POR FAVOR, LEIA AS REGRAS DO GRUPO* 📖\n\n` +
-                  `@${targetName}, para mantermos um ambiente saudável e respeitoso, pedimos que você leia atentamente as regras abaixo:\n\n` +
-                  `${regras}\n\n` +
-                  `✅ Seguir estas regras garante uma boa convivência para todos!\n` +
-                  `🤝 Contamos com sua colaboração.`,
-            mentions: [targetParticipant]
-        });
-
-        console.log(`✅ Regras enviadas para @${targetName}`);
-
-        // 🎵 Enviar TODOS os 4 áudios para advertência individual
-        await sendAudiosSequencialComResposta(sock, from, audios, 0, audios.length, regrasMessage, targetParticipant);
+        // 🎵 ENVIA TODOS OS ÁUDIOS FAZENDO QUOTE DO POSTER
+        await sendAudiosComQuoteDoPoster(sock, from, audios, posterMessage, targetParticipant);
 
         return true;
 
@@ -696,7 +637,7 @@ console.log('🚀 Iniciando carregamento dos áudios de regras...');
 carregarAudios().then(audios => {
     if (audios && audios.length > 0) {
         console.log('✅ alertaHandler pronto para uso!');
-        console.log(`📊 Configuração: TODOS os ${audios.length} áudios serão enviados em ambos os casos`);
+        console.log(`📊 Configuração: POSTER + ${audios.length} áudios`);
     } else {
         console.warn('⚠️ alertaHandler iniciado, mas nenhum áudio foi carregado');
     }
@@ -711,5 +652,5 @@ export default alertaHandler;
 export { 
     alertaHandler,
     carregarAudios,
-    sendAudiosSequencialComResposta
+    sendAudiosComQuoteDoPoster
 };
