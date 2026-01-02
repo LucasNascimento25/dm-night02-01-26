@@ -75,7 +75,7 @@ export async function handleBlacklistCommands(sock, from, userId, content, msg) 
         return true;
     }
 
-    // #addlista - AGORA COM REMOÇÃO AUTOMÁTICA DO GRUPO
+    // #addlista - Apenas adiciona à blacklist
     if (lowerContent.startsWith('#addlista ')) {
         // DELETA O COMANDO IMEDIATAMENTE - COM AWAIT
         await deleteCommandMessage(sock, from, userMsgKey);
@@ -96,25 +96,8 @@ export async function handleBlacklistCommands(sock, from, userId, content, msg) 
 
         const result = await addToBlacklist(number, motivo);
         
-        // 🆕 REMOVE DO GRUPO AUTOMATICAMENTE SE ESTIVER EM UM GRUPO
-        if (from.endsWith('@g.us')) {
-            const normalizedId = normalizeNumber(number);
-            try {
-                console.log(`🚨 Tentando remover ${normalizedId} do grupo ${from}...`);
-                await sock.groupParticipantsUpdate(from, [normalizedId], 'remove');
-                console.log(`✅ ${normalizedId} foi removido do grupo com sucesso!`);
-                
-                const sentMsg = await sock.sendMessage(from, { text: `${result} 🛑\n\n🚨 Usuário removido do grupo automaticamente!` });
-                setTimeout(() => sock.sendMessage(from, { delete: sentMsg.key }).catch(() => {}), 7000);
-            } catch (err) {
-                console.error('❌ Erro ao remover do grupo:', err.message);
-                const sentMsg = await sock.sendMessage(from, { text: `${result} 🛑\n\n⚠️ Adicionado à blacklist, mas não foi possível remover do grupo (usuário pode não estar no grupo).` });
-                setTimeout(() => sock.sendMessage(from, { delete: sentMsg.key }).catch(() => {}), 7000);
-            }
-        } else {
-            const sentMsg = await sock.sendMessage(from, { text: `${result} 🛑` });
-            setTimeout(() => sock.sendMessage(from, { delete: sentMsg.key }).catch(() => {}), 5000);
-        }
+        const sentMsg = await sock.sendMessage(from, { text: `${result} 🛑` });
+        setTimeout(() => sock.sendMessage(from, { delete: sentMsg.key }).catch(() => {}), 5000);
         
         return true;
     }
