@@ -52,9 +52,6 @@ export async function handleBanMessage(c, message) {
             return;
         }
 
-        // Deletar a mensagem do comando usando o mesmo método do antilink
-        await deleteCommandMessage(c, from, key);
-
         // Processar comando #ban com imagem
         if (msg?.imageMessage) {
             const imageCaption = msg.imageMessage.caption;
@@ -62,6 +59,9 @@ export async function handleBanMessage(c, message) {
             if (imageCaption?.includes('#ban')) {
                 const imageSender = msg.imageMessage.context?.participant;
                 if (imageSender && imageSender !== botId) {
+                    // Deleta comando do admin ANTES de executar ban
+                    await deleteCommandMessage(c, from, key);
+                    
                     await executeBanUser(c, from, imageSender, groupMetadata);
                     return;
                 }
@@ -74,9 +74,27 @@ export async function handleBanMessage(c, message) {
 
             if (commentText?.includes('#ban')) {
                 const quotedMessage = msg.extendedTextMessage.contextInfo;
-                const imageSender = quotedMessage?.participant;
-                if (imageSender && imageSender !== botId) {
-                    await executeBanUser(c, from, imageSender, groupMetadata);
+                const targetMessageId = quotedMessage?.stanzaId;
+                const targetParticipant = quotedMessage?.participant;
+                
+                if (targetParticipant && targetParticipant !== botId) {
+                    // 1. Deleta a mensagem do usuário que vai ser banido
+                    if (targetMessageId && isValidParticipant(targetParticipant)) {
+                        await deleteMessage(c, from, {
+                            remoteJid: from,
+                            id: targetMessageId,
+                            participant: targetParticipant
+                        });
+                        
+                        // Pequeno delay após deletar mensagem do usuário
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    }
+                    
+                    // 2. Deleta o comando do admin
+                    await deleteCommandMessage(c, from, key);
+                    
+                    // 3. Executa o banimento
+                    await executeBanUser(c, from, targetParticipant, groupMetadata);
                     return;
                 }
             }
@@ -95,6 +113,9 @@ export async function handleBanMessage(c, message) {
                 );
 
                 if (userToBan && userToBan.id !== botId) {
+                    // Deleta comando do admin
+                    await deleteCommandMessage(c, from, key);
+                    
                     await executeBanUser(c, from, userToBan.id, groupMetadata);
                 }
                 return;
@@ -111,6 +132,9 @@ export async function handleBanMessage(c, message) {
                 );
 
                 if (userToBan && userToBan.id !== botId) {
+                    // Deleta comando do admin
+                    await deleteCommandMessage(c, from, key);
+                    
                     await executeBanUser(c, from, userToBan.id, groupMetadata);
                 }
                 return;
@@ -121,7 +145,36 @@ export async function handleBanMessage(c, message) {
     }
 }
 
-// Função para deletar mensagem com múltiplas tentativas (baseada no antilink)
+// Função para deletar mensagem com múltiplas tentativas (igual ao alertaHandler)
+const deleteMessage = async (sock, groupId, messageKey) => {
+    const delays = [0, 100, 500, 1000, 2000, 5000];
+    
+    for (let i = 0; i < delays.length; i++) {
+        try {
+            if (delays[i] > 0) {
+                await new Promise(r => setTimeout(r, delays[i]));
+            }
+            
+            const key = {
+                remoteJid: messageKey.remoteJid || groupId,
+                fromMe: false,
+                id: messageKey.id,
+                participant: messageKey.participant
+            };
+            
+            await sock.sendMessage(groupId, { delete: key });
+            console.log(`✅ Mensagem do usuário deletada (tentativa ${i + 1})`);
+            return true;
+        } catch (error) {
+            if (i === delays.length - 1) {
+                console.log(`⚠️ Não foi possível deletar mensagem do usuário: ${error.message}`);
+            }
+        }
+    }
+    return false;
+};
+
+// Função para deletar comando do admin
 const deleteCommandMessage = async (sock, groupId, messageKey) => {
     const delays = [0, 100, 500, 1000, 2000, 5000];
     
@@ -145,6 +198,16 @@ const deleteCommandMessage = async (sock, groupId, messageKey) => {
     }
     return false;
 };
+
+// Função para validar participante (copiada do alertaHandler)
+function isValidParticipant(participant) {
+    if (!participant) return false;
+    
+    const participantNumber = participant.split('@')[0];
+    return !participantNumber.includes(':') && 
+           !participantNumber.startsWith('0') &&
+           participantNumber.length >= 10;
+}
 
 // Função auxiliar para executar banimento de usuário
 async function executeBanUser(c, groupId, userId, groupMetadata) {

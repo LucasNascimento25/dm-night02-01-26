@@ -1,4 +1,4 @@
-// replyTagHandler.js - RESPONDER E MARCAR TODOS
+// replyTagHandler.js - RESPONDER E MARCAR TODOS (✅ CORRIGIDO COM THUMBNAILS)
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -248,7 +248,7 @@ class ReplyTagHandler {
                 }
             }
 
-            // 🎥 PROCESSA VÍDEO DIRETO (sem resposta, apenas #totag na legenda)
+            // 🎥 PROCESSA VÍDEO DIRETO (✅ CORRIGIDO COM THUMBNAIL)
             if (currentVideoMessage && hasCurrentVideoCommand) {
                 console.log('🎥 Processando VÍDEO DIRETO com #totag...');
                 
@@ -266,6 +266,19 @@ class ReplyTagHandler {
 
                     console.log(`📦 Vídeo baixado: ${videoBuffer.length} bytes`);
 
+                    // ✨ EXTRAI THUMBNAIL DO VÍDEO ORIGINAL
+                    let jpegThumbnail = null;
+                    try {
+                        if (currentVideoMessage?.jpegThumbnail) {
+                            console.log('🖼️ Usando thumbnail original do vídeo');
+                            jpegThumbnail = currentVideoMessage.jpegThumbnail;
+                        } else {
+                            console.log('⚠️ Vídeo não possui thumbnail');
+                        }
+                    } catch (thumbError) {
+                        console.warn('⚠️ Não foi possível extrair thumbnail:', thumbError.message);
+                    }
+
                     // Remove o comando da legenda
                     const cleanCaption = currentVideoCaption.replace(/#totag/gi, '').trim();
                     const finalCaption = cleanCaption || "💃✨🎉";
@@ -274,7 +287,8 @@ class ReplyTagHandler {
                     await sock.sendMessage(from, {
                         video: videoBuffer,
                         caption: fullCaption,
-                        mentions: mentions
+                        mentions: mentions,
+                        jpegThumbnail: jpegThumbnail  // ✅ ADICIONA THUMBNAIL
                     });
 
                     console.log('✅ Vídeo direto reenviado com sucesso!');
@@ -352,7 +366,7 @@ class ReplyTagHandler {
                 }
             }
 
-            // 🎥 REPOSTA VÍDEO DA MENSAGEM ORIGINAL
+            // 🎥 REPOSTA VÍDEO DA MENSAGEM ORIGINAL (✅ CORRIGIDO COM THUMBNAIL)
             if (quotedMessage.videoMessage) {
                 console.log('🎥 Repostando VÍDEO da mensagem respondida...');
                 
@@ -375,6 +389,19 @@ class ReplyTagHandler {
 
                     console.log(`📦 Vídeo baixado: ${videoBuffer.length} bytes`);
 
+                    // ✨ EXTRAI THUMBNAIL DO VÍDEO ORIGINAL
+                    let jpegThumbnail = null;
+                    try {
+                        if (quotedMessage.videoMessage?.jpegThumbnail) {
+                            console.log('🖼️ Usando thumbnail original do vídeo respondido');
+                            jpegThumbnail = quotedMessage.videoMessage.jpegThumbnail;
+                        } else {
+                            console.log('⚠️ Vídeo respondido não possui thumbnail');
+                        }
+                    } catch (thumbError) {
+                        console.warn('⚠️ Não foi possível extrair thumbnail:', thumbError.message);
+                    }
+
                     // Captura legenda original ou usa a do comando
                     const originalCaption = quotedMessage.videoMessage.caption || '';
                     const commandCaption = currentVideoCaption.replace(/#totag/gi, '').trim();
@@ -384,7 +411,8 @@ class ReplyTagHandler {
                     await sock.sendMessage(from, {
                         video: videoBuffer,
                         caption: fullCaption,
-                        mentions: mentions
+                        mentions: mentions,
+                        jpegThumbnail: jpegThumbnail  // ✅ ADICIONA THUMBNAIL
                     });
 
                     console.log('✅ Vídeo repostado com sucesso!');
