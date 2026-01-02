@@ -4,7 +4,7 @@ const { fetchProfilePictureUrl } = pkg;
 
 // Defina seus números de WhatsApp
 const yourNumbers = [
-    // '4121972337640@s.whatsapp.net'
+    '5521972337640@s.whatsapp.net'
 ];
 
 // Função para enviar mensagens de aviso
