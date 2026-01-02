@@ -25,8 +25,9 @@ export async function handleGroupParticipantsEvent(sock, update) {
         }
 
         // 3️⃣ Processar saídas e remoções (despedida)
+        // ✅ CORREÇÃO: Passa o update completo
         if (action === 'remove' || action === 'leave') {
-            await handleUserRemove(sock, groupId, update.participants, action, update.author);
+            await handleUserRemove(sock, update);
         }
 
         // 4️⃣ Auto-atualizar grupo para AutoTag

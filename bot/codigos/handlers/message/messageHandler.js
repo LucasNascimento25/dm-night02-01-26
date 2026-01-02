@@ -245,25 +245,21 @@ export async function handleGroupParticipantsUpdate(sock, update) {
     try {
         await handleGroupUpdate(sock, update);
         
+        // ✅ APENAS PARA REMOÇÕES/SAÍDAS
         if (update.action === 'remove') {
-            const groupId = update.id;
-            const author = update.author;
-            
-            for (const participant of update.participants) {
-                if (DEBUG_MODE) {
-                    console.log(`\n👋 ========= PROCESSANDO SAÍDA/REMOÇÃO =========`);
-                    console.log(`🎬 Ação detectada: "${update.action}"`);
-                    console.log(`👮 Author (quem executou): ${author}`);
-                    console.log(`👥 Total de participantes afetados: ${update.participants.length}`);
-                    console.log(`📤 Processando despedida para: ${participant.phoneNumber || participant.id}`);
-                    console.log(`📱 Telefone: ${extrairNumeroJID(participant.phoneNumber || participant.id)}`);
-                    console.log(`🔄 Chamando configurarDespedida com action="${update.action}" e author="${author}"`);
-                }
-                
-                await configurarDespedida(sock, groupId, participant, update.action, author);
+            if (DEBUG_MODE) {
+                console.log(`\n👋 ========= PROCESSANDO SAÍDA/REMOÇÃO =========`);
+                console.log(`🎬 Ação detectada: "${update.action}"`);
+                console.log(`👮 Author (quem executou): ${update.author}`);
+                console.log(`👥 Total de participantes afetados: ${update.participants.length}`);
+                console.log(`🔄 Chamando configurarDespedida com update completo`);
             }
             
+            // ✅ PASSA O UPDATE COMPLETO, IGUAL AO AVISOADM.JS
+            await configurarDespedida(sock, update);
+            
             if (DEBUG_MODE) {
+                console.log(`✅ Despedida processada`);
                 console.log(`==============================================\n`);
             }
         }
