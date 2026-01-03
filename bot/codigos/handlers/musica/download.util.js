@@ -1,22 +1,13 @@
-// 🛡️ YT-DLP COM ANTI-DETECÇÃO (SEM COOKIES)
-import pkg from 'yt-dlp-wrap';
-const { default: YTDlpWrap } = pkg;
+// 🛡️ YOUTUBE DOWNLOADER - COMPATÍVEL COM TERMUX
 import ytSearch from 'yt-search';
 import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-let ytDlp = null;
-let isInitialized = false;
 const urlCache = new Map();
 const CACHE_DURATION = 10 * 60 * 1000;
 
@@ -26,51 +17,24 @@ let lastDownloadTime = 0;
 
 // 📊 ESTATÍSTICAS
 let stats = {
-    ytDlpSuccess: 0,
-    ytDlpFail: 0,
+    success: 0,
+    fail: 0,
     totalDownloads: 0
 };
 
-async function initYtDlp() {
-    if (isInitialized && ytDlp) {
-        return ytDlp;
-    }
-    
+// 🔍 VERIFICAR SE YT-DLP ESTÁ INSTALADO
+async function verificarYtDlp() {
     try {
-        const isLinux = process.platform === 'linux' || process.platform === 'android';
-        
-        if (isLinux) {
-            try {
-                await execFileAsync('which', ['yt-dlp']);
-                ytDlp = new YTDlpWrap('yt-dlp');
-                console.log('🐧 [LINUX] yt-dlp encontrado via pip');
-            } catch {
-                throw new Error('yt-dlp não instalado. Execute: pip install -U yt-dlp');
-            }
-        } else {
-            const localBinPath = join(__dirname, "../../../../yt-dlp.exe");
-            try {
-                await fs.access(localBinPath);
-                ytDlp = new YTDlpWrap(localBinPath);
-            } catch {
-                const downloadedPath = await YTDlpWrap.downloadFromGithub();
-                ytDlp = new YTDlpWrap(downloadedPath);
-            }
-        }
-        
-        // 🔄 ATUALIZA YT-DLP AUTOMATICAMENTE
-        try {
-            console.log('🔄 Verificando atualizações do yt-dlp...');
-            await ytDlp.execPromise(['-U']);
-            console.log('✅ yt-dlp atualizado!');
-        } catch (err) {
-            console.warn('⚠️ Não foi possível atualizar yt-dlp:', err.message);
-        }
-        
-        isInitialized = true;
-        return ytDlp;
+        const { stdout } = await execFileAsync('yt-dlp', ['--version']);
+        console.log(`✅ yt-dlp encontrado: ${stdout.trim()}`);
+        return true;
     } catch (err) {
-        throw new Error(`Falha ao inicializar yt-dlp: ${err.message}`);
+        throw new Error(
+            '❌ yt-dlp não encontrado!\n' +
+            'Instale no Termux com:\n' +
+            '  pkg install python ffmpeg\n' +
+            '  pip install -U yt-dlp'
+        );
     }
 }
 
@@ -78,6 +42,7 @@ function isYouTubeUrl(url) {
     return url.includes('youtube.com') || url.includes('youtu.be');
 }
 
+// 🔍 BUSCAR MÚSICA POR NOME
 export async function buscarUrlPorNome(termo) {
     const cacheKey = termo.toLowerCase().trim();
     const cached = urlCache.get(cacheKey);
@@ -122,8 +87,11 @@ async function resolverUrl(input) {
     return await buscarUrlPorNome(input);
 }
 
+// 📋 OBTER INFORMAÇÕES DA MÚSICA
 export async function obterDadosMusica(url) {
     try {
+        await verificarYtDlp();
+        
         const inicio = Date.now();
         let urlResolvida, infoCache;
         
@@ -141,20 +109,19 @@ export async function obterDadosMusica(url) {
             return infoCache;
         }
         
-        const ytDlp = await initYtDlp();
-        
         const args = [
             urlResolvida,
             '--dump-json',
             '--no-warnings',
             '--no-playlist',
             '--skip-download',
-            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             '--referer', 'https://www.youtube.com/'
         ];
         
-        const info = await ytDlp.execPromise(args);
-        const data = JSON.parse(info);
+        const { stdout } = await execFileAsync('yt-dlp', args);
+        const data = JSON.parse(stdout);
+        
         console.log(`✅ [INFO-YTDLP] ${Date.now() - inicio}ms`);
         return {
             titulo: data.title,
@@ -173,6 +140,8 @@ async function baixarComYtDlp(urlResolvida, tentativa = 1) {
     let tempFile = null;
     
     try {
+        await verificarYtDlp();
+        
         // 🕐 RATE LIMITING
         const now = Date.now();
         const timeSinceLastDownload = now - lastDownloadTime;
@@ -186,7 +155,6 @@ async function baixarComYtDlp(urlResolvida, tentativa = 1) {
         const inicioYtDlp = Date.now();
         console.log(`🔄 [YT-DLP] Tentativa ${tentativa}/3 - Iniciando download...`);
         
-        const ytDlp = await initYtDlp();
         const randomId = randomBytes(8).toString('hex');
         tempFile = join(tmpdir(), `music_${randomId}.opus`);
 
@@ -210,7 +178,7 @@ async function baixarComYtDlp(urlResolvida, tentativa = 1) {
             '--fragment-retries', '10',
             
             // 🛡️ ANTI-DETECÇÃO
-            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             '--referer', 'https://www.youtube.com/',
             
             // 🌐 BYPASS
@@ -233,14 +201,17 @@ async function baixarComYtDlp(urlResolvida, tentativa = 1) {
             '--output', tempFile
         ];
 
-        await ytDlp.execPromise(args);
+        // Executar yt-dlp diretamente
+        await execFileAsync('yt-dlp', args, {
+            maxBuffer: 50 * 1024 * 1024 // 50MB buffer
+        });
 
         const buffer = await fs.readFile(tempFile);
         const tempoYtDlp = Date.now() - inicioYtDlp;
         const tamanhoMB = (buffer.length / 1024 / 1024).toFixed(2);
         
         console.log(`✅ [YT-DLP] ${(tempoYtDlp/1000).toFixed(1)}s (${tamanhoMB}MB)`);
-        stats.ytDlpSuccess++;
+        stats.success++;
         stats.totalDownloads++;
         
         return { buffer, metodo: 'yt-dlp', formato: 'opus' };
@@ -255,7 +226,7 @@ async function baixarComYtDlp(urlResolvida, tentativa = 1) {
         }
         
         if (tentativa >= 3) {
-            stats.ytDlpFail++;
+            stats.fail++;
             throw err;
         }
         
@@ -348,7 +319,7 @@ export function obterEstatisticas() {
     return {
         ...stats,
         taxaSucesso: stats.totalDownloads > 0 
-            ? ((stats.ytDlpSuccess / stats.totalDownloads) * 100).toFixed(1) + '%' 
+            ? ((stats.success / stats.totalDownloads) * 100).toFixed(1) + '%' 
             : '0%'
     };
 }
@@ -356,8 +327,6 @@ export function obterEstatisticas() {
 // 🧹 CLEANUP
 export async function cleanup() {
     urlCache.clear();
-    isInitialized = false;
-    ytDlp = null;
     console.log('🧹 Recursos limpos');
     console.log('📊 Estatísticas finais:', obterEstatisticas());
 }

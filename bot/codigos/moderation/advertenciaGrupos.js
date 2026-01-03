@@ -1,16 +1,12 @@
 import pool from '../../../db.js';
 import axios from 'axios';
 import ffmpeg from "fluent-ffmpeg";
-import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Configurar FFMPEG
-ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 // ============================================
 // CONFIGURAÇÃO
