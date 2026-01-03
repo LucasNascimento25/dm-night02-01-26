@@ -92,6 +92,13 @@ export const configurarDespedida = async (socket, update) => {
         console.log('📋 participantData:', participantData);
         console.log('📋 participant extraído:', participant);
         
+        // Extrai o número para a menção e o nome do participante
+        const participantPhoneNumber = participant.split('@')[0];
+        const participantName = participantData?.pushname || participantPhoneNumber || "Usuário";
+        
+        console.log('📱 participantPhoneNumber:', participantPhoneNumber);
+        console.log('👤 participantName:', participantName);
+        
         // Para comparação de IDs (quando é objeto, usa o .id)
         const participantIdForComparison = typeof participantData === 'object' && participantData !== null 
             ? participantData.id 
@@ -116,9 +123,6 @@ export const configurarDespedida = async (socket, update) => {
         }
 
         console.log('✅ Usuário saiu voluntariamente, enviando despedida...');
-
-        // Extrai apenas o número para a menção
-        const participantPhoneNumber = participant.split('@')[0];
 
         // Lista de URLs de imagens/GIFs de despedida
         const farewellImages = [
